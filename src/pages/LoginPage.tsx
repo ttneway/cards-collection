@@ -21,6 +21,12 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+
+    if (isSignUp && password.length < 6) {
+      setError('密碼至少需要 6 個字元')
+      return
+    }
+
     setLoading(true)
 
     const err = isSignUp
@@ -72,7 +78,9 @@ export default function LoginPage() {
               onChange={e => setPassword(e.target.value)}
               className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 focus:border-indigo-500 outline-none"
               required
+              minLength={6}
             />
+            {isSignUp && <p className="text-xs text-slate-500 mt-1">至少 6 個字元</p>}
           </div>
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
