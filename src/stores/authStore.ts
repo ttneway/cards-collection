@@ -25,13 +25,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ loading: false, initialized: true, configError: true })
       return
     }
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.user) {
-      const { data: profile } = await supabase
+
+    const getProfile = async (userId: string) => {
+      let { data: profile } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', session.user.id)
+        .eq('id', userId)
         .single()
+
+      if (!profile) {
+        const { data: user } = await supabase.auth.getUser()
+        if (user?.user) {
+          const newProfile = {
+            id: userId,
+            email: user.user.email ?? '',
+            name: user.user.user_metadata?.name ?? user.user.email?.split('@')[0] ?? '使用者',
+            role: 'student' as const,
+            stars: 0
+          }
+          await supabase.from('profiles').insert(newProfile)
+          profile = newProfile
+        }
+      }
+
+      return profile
+    }
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      const profile = await getProfile(session.user.id)
       set({ user: profile, loading: false, initialized: true })
     } else {
       set({ loading: false, initialized: true })
@@ -39,11 +61,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single()
+        const profile = await getProfile(session.user.id)
         set({ user: profile })
       } else {
         set({ user: null })
