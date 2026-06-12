@@ -77,7 +77,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signUp: async (email, password, name) => {
     if (!isSupabaseConfigured) return 'Supabase 未設定'
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { name } }
