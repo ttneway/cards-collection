@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "icons": "node scripts/generate-icons.js",
-    "postinstall": "node scripts/generate-icons.js"
+    "postinstall": "node scripts/generate-icons.js || true"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
