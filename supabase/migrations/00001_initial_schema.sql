@@ -188,6 +188,101 @@ CREATE POLICY profiles_read_own ON profiles FOR SELECT
 CREATE POLICY profiles_update_own ON profiles FOR UPDATE
   USING (auth.uid() = id);
 
+CREATE POLICY profiles_insert_own ON profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
+
+-- User cards
+CREATE POLICY user_cards_select_own ON user_cards FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY user_cards_insert_own ON user_cards FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY user_cards_update_own ON user_cards FOR UPDATE
+  USING (auth.uid() = user_id);
+
+-- Tasks
+CREATE POLICY tasks_select_active ON tasks FOR SELECT
+  USING (is_active = true);
+
+CREATE POLICY tasks_manage_teacher ON tasks FOR ALL
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'));
+
+-- Task completions
+CREATE POLICY task_completions_select_own ON task_completions FOR SELECT
+  USING (auth.uid() = user_id OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('teacher', 'leader')));
+
+CREATE POLICY task_completions_insert_own ON task_completions FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY task_completions_update_leader ON task_completions FOR UPDATE
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('teacher', 'leader')));
+
+-- Achievements
+CREATE POLICY achievements_select_active ON achievements FOR SELECT
+  USING (is_active = true);
+
+CREATE POLICY achievements_manage_teacher ON achievements FOR ALL
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'));
+
+-- User achievements
+CREATE POLICY user_achievements_select_own ON user_achievements FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY user_achievements_insert_own ON user_achievements FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+-- Card packs
+CREATE POLICY card_packs_select_active ON card_packs FOR SELECT
+  USING (is_active = true);
+
+CREATE POLICY card_packs_manage_teacher ON card_packs FOR ALL
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'));
+
+-- Pack contents
+CREATE POLICY pack_contents_select ON pack_contents FOR SELECT
+  USING (EXISTS (SELECT 1 FROM card_packs WHERE id = pack_id AND is_active = true));
+
+-- Transactions
+CREATE POLICY transactions_select_own ON transactions FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY transactions_insert_own ON transactions FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+-- Trades
+CREATE POLICY trades_select_involved ON trades FOR SELECT
+  USING (auth.uid() = from_user_id OR auth.uid() = to_user_id OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'));
+
+CREATE POLICY trades_insert_own ON trades FOR INSERT
+  WITH CHECK (auth.uid() = from_user_id);
+
+CREATE POLICY trades_update_approve ON trades FOR UPDATE
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('teacher', 'leader')));
+
+-- Classes
+CREATE POLICY classes_select_member ON classes FOR SELECT
+  USING (EXISTS (SELECT 1 FROM profiles WHERE (id = auth.uid() AND class_id = classes.id) OR role = 'teacher'));
+
+CREATE POLICY classes_manage_teacher ON classes FOR ALL
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'));
+
+-- Class leaders
+CREATE POLICY class_leaders_select ON class_leaders FOR SELECT
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND (class_id = class_leaders.class_id OR role = 'teacher')));
+
+CREATE POLICY class_leaders_manage_teacher ON class_leaders FOR ALL
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher'));
+
+-- Task rewards
+CREATE POLICY task_rewards_select ON task_rewards FOR SELECT
+  USING (EXISTS (SELECT 1 FROM tasks WHERE id = task_id AND is_active = true));
+
 -- Cards: everyone can read active cards
 CREATE POLICY cards_read_active ON cards FOR SELECT
   USING (is_active = true);

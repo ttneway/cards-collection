@@ -12,6 +12,7 @@ interface AuthState {
   signUp: (email: string, password: string, name: string) => Promise<string | null>
   signOut: () => Promise<void>
   hasRole: (...roles: Role[]) => boolean
+  refreshProfile: () => Promise<void>
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -26,34 +27,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return
     }
 
-    const getProfile = async (userId: string) => {
-      let { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
-
-      if (!profile) {
-        const { data: user } = await supabase.auth.getUser()
-        if (user?.user) {
-          const newProfile = {
-            id: userId,
-            email: user.user.email ?? '',
-            name: user.user.user_metadata?.name ?? user.user.email?.split('@')[0] ?? '使用者',
-            role: 'student' as const,
-            stars: 0
-          }
-          await supabase.from('profiles').insert(newProfile)
-          profile = newProfile
-        }
-      }
-
-      return profile
-    }
-
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
-      const profile = await getProfile(session.user.id)
+      const profile = await getOrCreateProfile(session.user.id)
       set({ user: profile, loading: false, initialized: true })
     } else {
       set({ loading: false, initialized: true })
@@ -61,7 +37,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        const profile = await getProfile(session.user.id)
+        const profile = await getOrCreateProfile(session.user.id)
         set({ user: profile })
       } else {
         set({ user: null })
@@ -95,5 +71,45 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { user } = get()
     if (!user) return false
     return roles.includes(user.role)
+  },
+
+  refreshProfile: async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      const profile = await getOrCreateProfile(session.user.id)
+      set({ user: profile })
+    }
   }
 }))
+
+async function getOrCreateProfile(userId: string): Promise<Profile | null> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single()
+
+  if (profile) return profile as Profile
+
+  const { data: userData } = await supabase.auth.getUser()
+  if (!userData?.user) return null
+
+  const newProfile: Profile = {
+    id: userId,
+    email: userData.user.email ?? '',
+    name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '使用者',
+    role: 'student',
+    stars: 0,
+    class_id: null,
+    student_id: null,
+    avatar_url: null,
+    created_at: new Date().toISOString()
+  }
+
+  const { error } = await supabase.from('profiles').insert(newProfile)
+  if (error) {
+    console.error('建立 profile 失敗:', error.message)
+    return null
+  }
+  return newProfile
+}
