@@ -31,7 +31,7 @@ function RoleRoute({ children, roles }: { children: React.ReactNode; roles: stri
 }
 
 export default function App() {
-  const { initialize, initialized } = useAuthStore()
+  const { initialize, initialized, configError } = useAuthStore()
 
   useEffect(() => {
     initialize()
@@ -41,6 +41,31 @@ export default function App() {
     return (
       <div className="flex items-center justify-center min-h-dvh bg-slate-900">
         <p className="text-slate-400">載入中...</p>
+      </div>
+    )
+  }
+
+  if (configError) {
+    return (
+      <div className="flex items-center justify-center min-h-dvh bg-slate-900 px-4">
+        <div className="text-center max-w-sm">
+          <p className="text-4xl mb-4">⚙️</p>
+          <h1 className="text-xl font-bold text-white mb-2">需要設定</h1>
+          <p className="text-slate-400 text-sm mb-4">
+            Supabase 環境變數尚未設定。
+            <br />
+            請在 GitHub Secrets 中設定 <code className="text-indigo-400">VITE_SUPABASE_URL</code> 與{' '}
+            <code className="text-indigo-400">VITE_SUPABASE_ANON_KEY</code>，然後重新部署。
+          </p>
+          <a
+            href="https://github.com/ttneway/cards-collection/settings/secrets/actions"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block bg-indigo-600 text-white px-6 py-2 rounded-lg text-sm font-medium no-underline hover:bg-indigo-500"
+          >
+            前往設定 Secrets
+          </a>
+        </div>
       </div>
     )
   }

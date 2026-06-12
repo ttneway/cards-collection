@@ -1,11 +1,12 @@
 import { create } from 'zustand'
-import { supabase } from '../lib/supabase'
+import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import type { Profile, Role } from '../types'
 
 interface AuthState {
   user: Profile | null
   loading: boolean
   initialized: boolean
+  configError: boolean
   initialize: () => Promise<void>
   signIn: (email: string, password: string) => Promise<string | null>
   signUp: (email: string, password: string, name: string) => Promise<string | null>
@@ -17,8 +18,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loading: true,
   initialized: false,
+  configError: !isSupabaseConfigured,
 
   initialize: async () => {
+    if (!isSupabaseConfigured) {
+      set({ loading: false, initialized: true, configError: true })
+      return
+    }
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
       const { data: profile } = await supabase
@@ -46,11 +52,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signIn: async (email, password) => {
+    if (!isSupabaseConfigured) return 'Supabase 未設定'
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     return error?.message ?? null
   },
 
   signUp: async (email, password, name) => {
+    if (!isSupabaseConfigured) return 'Supabase 未設定'
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) return error.message
     if (data.user) {
