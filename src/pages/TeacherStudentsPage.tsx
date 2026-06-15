@@ -31,6 +31,7 @@ export default function TeacherStudentsPage() {
     () => students.find(student => student.id === selectedId) ?? students[0],
     [selectedId, students]
   )
+  const isEditingSelf = Boolean(draft && user?.id === draft.id)
 
   const filtered = students.filter(student => {
     const text = `${student.name} ${student.email} ${student.student_id ?? ''} ${student.title ?? ''}`.toLowerCase()
@@ -96,6 +97,10 @@ export default function TeacherStudentsPage() {
 
   const saveStudent = async () => {
     if (!draft) return
+    if (isEditingSelf && draft.role !== user?.role) {
+      setError('為了避免誤把教師帳號降權，不能在這裡變更目前登入帳號的角色。')
+      return
+    }
     setSaving(true)
     setError(null)
     setMessage(null)
@@ -218,6 +223,7 @@ export default function TeacherStudentsPage() {
               <p className="text-xs text-slate-400">{student.student_id || student.email}</p>
               <span className="text-[11px] text-indigo-300">
                 {ROLE_LABELS[student.role]} · {classes.find(item => item.id === student.class_id)?.name ?? '未分班'}
+                {user?.id === student.id ? ' · 目前登入帳號' : ''}
               </span>
             </button>
           ))}
@@ -226,6 +232,11 @@ export default function TeacherStudentsPage() {
         {draft && (
           <div className="space-y-4">
             <div className="bg-slate-800 rounded-lg p-4 space-y-4">
+              {isEditingSelf && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                  這是目前登入的教師帳號。可以調整姓名、學號、職稱或班級，但角色已鎖定，避免誤降權後失去教師後台。
+                </div>
+              )}
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">姓名</label>
@@ -237,7 +248,12 @@ export default function TeacherStudentsPage() {
                 </div>
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">角色</label>
-                  <select value={draft.role} onChange={event => setDraft({ ...draft, role: event.target.value as Role })} className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500">
+                  <select
+                    value={draft.role}
+                    disabled={isEditingSelf}
+                    onChange={event => setDraft({ ...draft, role: event.target.value as Role })}
+                    className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500 disabled:opacity-60"
+                  >
                     <option value="student">學生</option>
                     <option value="leader">幹部/小老師</option>
                     <option value="teacher">教師</option>
