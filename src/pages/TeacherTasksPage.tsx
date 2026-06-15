@@ -30,6 +30,9 @@ const emptyForm = {
   recurrence_type: 'daily' as TaskRecurrenceType,
   per_period_limit: 1,
   custom_reset_days: 7,
+  scan_window_enabled: false,
+  window_start_time: '07:00',
+  window_end_time: '08:00',
   is_active: true
 }
 
@@ -105,7 +108,7 @@ export default function TeacherTasksPage() {
     setError(null)
     setMessage(null)
 
-    const { error } = await supabase.from('tasks').insert({
+    const taskPayload: Record<string, unknown> = {
       title: form.title.trim(),
       description: form.description.trim(),
       points: Number(form.points),
@@ -118,7 +121,16 @@ export default function TeacherTasksPage() {
       per_period_limit: Number(form.per_period_limit),
       code_format: 'both',
       is_active: form.is_active
-    })
+    }
+
+    if (form.scan_window_enabled) {
+      taskPayload.scan_window_enabled = true
+      taskPayload.window_start_time = form.window_start_time
+      taskPayload.window_end_time = form.window_end_time
+      taskPayload.window_timezone = 'Asia/Taipei'
+    }
+
+    const { error } = await supabase.from('tasks').insert(taskPayload)
 
     if (error) {
       setError(error.message)
@@ -194,6 +206,27 @@ export default function TeacherTasksPage() {
               <input type="number" min="1" value={form.custom_reset_days} onChange={event => setForm({ ...form, custom_reset_days: Number(event.target.value) })} className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500" />
             </div>
           )}
+          <label className="flex items-center gap-2 text-sm text-slate-300 bg-slate-700/50 rounded-lg px-3 py-2 border border-slate-600">
+            <input
+              type="checkbox"
+              checked={form.scan_window_enabled}
+              onChange={event => setForm({ ...form, scan_window_enabled: event.target.checked })}
+              className="accent-indigo-500"
+            />
+            限定掃碼時間
+          </label>
+          {form.scan_window_enabled && (
+            <>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">開始時間</label>
+                <input type="time" value={form.window_start_time} onChange={event => setForm({ ...form, window_start_time: event.target.value })} className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">結束時間</label>
+                <input type="time" value={form.window_end_time} onChange={event => setForm({ ...form, window_end_time: event.target.value })} className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500" />
+              </div>
+            </>
+          )}
         </div>
         <div>
           <label className="block text-sm text-slate-400 mb-1">描述</label>
@@ -215,6 +248,9 @@ export default function TeacherTasksPage() {
                 <p className="text-sm text-slate-400">{task.description || '無描述'}</p>
                 <p className="text-xs text-slate-500 mt-1">
                   {task.points} 點 · {RECURRENCE_LABELS[task.recurrence_type]} · 每週期 {task.per_period_limit} 次
+                  {task.scan_window_enabled && task.window_start_time && task.window_end_time
+                    ? ` · 限時 ${task.window_start_time.slice(0, 5)}-${task.window_end_time.slice(0, 5)}`
+                    : ''}
                 </p>
               </div>
               <button onClick={() => toggleTaskActive(task)} className={`rounded-lg px-3 py-1.5 text-sm ${task.is_active ? 'bg-green-600/20 text-green-400' : 'bg-slate-700 text-slate-400'}`}>

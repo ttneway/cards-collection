@@ -110,6 +110,10 @@ export interface Task {
   recurrence_type: TaskRecurrenceType
   custom_reset_days: number | null
   per_period_limit: number
+  scan_window_enabled: boolean
+  window_start_time: string | null
+  window_end_time: string | null
+  window_timezone: string
   code_format: 'code128' | 'qr' | 'both'
   is_active: boolean
   max_completions: number | null
