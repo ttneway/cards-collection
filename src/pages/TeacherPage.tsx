@@ -58,7 +58,7 @@ export default function TeacherPage() {
           { icon: Library, label: '管理卡牌', desc: '新增/編輯/刪除卡牌', href: '/teacher/cards' },
           { icon: ListChecks, label: '管理任務', desc: '發布任務、產生任務碼', href: '/teacher/tasks' },
           { icon: Trophy, label: '管理成就', desc: '設定成就條件與獎勵', href: '/teacher/achievements' },
-          { icon: Users, label: '管理班級', desc: '班級設定、指派幹部', href: '/teacher/classes' },
+          { icon: Users, label: '學生與條碼', desc: '角色、職稱、身分碼與列印', href: '/teacher/students' },
         ].map(item => (
           <Link
             key={item.href}
