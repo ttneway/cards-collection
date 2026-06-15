@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Download, Plus, Printer, RefreshCw, Save, ScanLine } from 'lucide-react'
+import { Download, Plus, Power, PowerOff, Printer, RefreshCw, Save, ScanLine } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import BarcodeLabel from '../components/BarcodeLabel'
@@ -143,12 +143,17 @@ export default function TeacherTasksPage() {
   }
 
   const toggleTaskActive = async (task: Task) => {
+    setError(null)
+    setMessage(null)
     const { error } = await supabase
       .from('tasks')
       .update({ is_active: !task.is_active })
       .eq('id', task.id)
     if (error) setError(error.message)
-    else loadTasks()
+    else {
+      setMessage(task.is_active ? `已關閉任務：${task.title}` : `已啟用任務：${task.title}`)
+      await loadTasks()
+    }
   }
 
   const exportRecords = () => {
@@ -253,9 +258,22 @@ export default function TeacherTasksPage() {
                     : ''}
                 </p>
               </div>
-              <button onClick={() => toggleTaskActive(task)} className={`rounded-lg px-3 py-1.5 text-sm ${task.is_active ? 'bg-green-600/20 text-green-400' : 'bg-slate-700 text-slate-400'}`}>
-                {task.is_active ? '開放中' : '已關閉'}
-              </button>
+              <div className="flex flex-col items-end gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${task.is_active ? 'bg-green-600/20 text-green-300' : 'bg-slate-700 text-slate-400'}`}>
+                  {task.is_active ? '目前啟用' : '目前關閉'}
+                </span>
+                <button
+                  onClick={() => toggleTaskActive(task)}
+                  className={`rounded-lg px-3 py-2 text-sm flex items-center gap-2 ${
+                    task.is_active
+                      ? 'bg-red-600/20 text-red-300 hover:bg-red-600/30'
+                      : 'bg-green-600/20 text-green-300 hover:bg-green-600/30'
+                  }`}
+                >
+                  {task.is_active ? <PowerOff size={16} /> : <Power size={16} />}
+                  {task.is_active ? '關閉任務' : '啟用任務'}
+                </button>
+              </div>
             </div>
             <BarcodeLabel value={task.task_code} label="任務條碼" />
             <div className="flex flex-wrap gap-2">
