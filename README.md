@@ -51,4 +51,4 @@ https://ttneway.github.io/cards-collection/
 
 ## Supabase
 
-Apply the SQL in `supabase/migrations/00001_initial_schema.sql` to create the initial schema, RLS policies, RPC functions, and seed data.
+Apply the SQL files in `supabase/migrations/` in order. Existing projects that already applied `00001_initial_schema.sql` should also apply `00002_fix_profile_rls.sql` to fix profile loading during login.

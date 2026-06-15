@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { Sparkles } from 'lucide-react'
@@ -13,10 +13,9 @@ export default function LoginPage() {
   const { signIn, signUp, user } = useAuthStore()
   const navigate = useNavigate()
 
-  if (user) {
-    navigate('/')
-    return null
-  }
+  useEffect(() => {
+    if (user) navigate('/')
+  }, [navigate, user])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -33,10 +32,15 @@ export default function LoginPage() {
       ? await signUp(email, password, name)
       : await signIn(email, password)
 
-    if (err) setError(err)
-    else navigate('/')
+    if (err) {
+      setError(err)
+    } else {
+      navigate('/')
+    }
     setLoading(false)
   }
+
+  if (user) return null
 
   return (
     <div className="min-h-dvh flex items-center justify-center bg-slate-900 px-4">

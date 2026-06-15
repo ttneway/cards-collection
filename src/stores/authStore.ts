@@ -42,8 +42,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        const profile = await getOrCreateProfile(session.user.id)
-        set({ user: profile })
+        try {
+          const profile = await getOrCreateProfile(session.user.id)
+          set({ user: profile })
+        } catch (e) {
+          console.error('更新登入狀態失敗:', e)
+          set({ user: null })
+        }
       } else {
         set({ user: null })
       }
@@ -58,8 +63,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (data?.user) {
         const profile = await getOrCreateProfile(data.user.id)
         set({ user: profile })
+        return null
       }
-      return null
+      return '登入失敗，請確認帳號或密碼是否正確'
     } catch (e: any) {
       return e?.message || '登入失敗'
     }
@@ -90,49 +96,53 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   refreshProfile: async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
-      const profile = await getOrCreateProfile(session.user.id)
-      set({ user: profile })
+      try {
+        const profile = await getOrCreateProfile(session.user.id)
+        set({ user: profile })
+      } catch (e) {
+        console.error('更新 profile 失敗:', e)
+        set({ user: null })
+      }
     }
   }
 }))
 
-async function getOrCreateProfile(userId: string): Promise<Profile | null> {
-  try {
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle()
+async function getOrCreateProfile(userId: string): Promise<Profile> {
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle()
 
-    if (error) {
-      console.error('查詢 profile 失敗:', error.message)
-    }
-
-    if (profile) return profile as Profile
-
-    const { data: userData } = await supabase.auth.getUser()
-    if (!userData?.user) return null
-
-    const newProfile: Profile = {
-      id: userId,
-      email: userData.user.email ?? '',
-      name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '使用者',
-      role: 'student',
-      stars: 0,
-      class_id: null,
-      student_id: null,
-      avatar_url: null,
-      created_at: new Date().toISOString()
-    }
-
-    const { error: insertError } = await supabase.from('profiles').insert(newProfile)
-    if (insertError) {
-      console.error('建立 profile 失敗:', insertError.message)
-      return null
-    }
-    return newProfile
-  } catch (e) {
-    console.error('getOrCreateProfile 錯誤:', e)
-    return null
+  if (error) {
+    throw new Error(`查詢使用者資料失敗：${error.message}`)
   }
+
+  if (profile) return profile as Profile
+
+  const { data: userData, error: userError } = await supabase.auth.getUser()
+  if (userError) {
+    throw new Error(`取得登入使用者失敗：${userError.message}`)
+  }
+  if (!userData?.user) {
+    throw new Error('登入成功，但無法取得登入使用者資料。')
+  }
+
+  const newProfile: Profile = {
+    id: userId,
+    email: userData.user.email ?? '',
+    name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '使用者',
+    role: 'student',
+    stars: 0,
+    class_id: null,
+    student_id: null,
+    avatar_url: null,
+    created_at: new Date().toISOString()
+  }
+
+  const { error: insertError } = await supabase.from('profiles').insert(newProfile)
+  if (insertError) {
+    throw new Error(`建立使用者資料失敗：${insertError.message}`)
+  }
+  return newProfile
 }
