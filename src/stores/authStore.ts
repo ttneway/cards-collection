@@ -27,11 +27,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return
     }
 
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.user) {
-      const profile = await getOrCreateProfile(session.user.id)
-      set({ user: profile, loading: false, initialized: true })
-    } else {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        const profile = await getOrCreateProfile(session.user.id)
+        set({ user: profile, loading: false, initialized: true })
+      } else {
+        set({ loading: false, initialized: true })
+      }
+    } catch (e) {
+      console.error('初始化失敗:', e)
       set({ loading: false, initialized: true })
     }
 
@@ -47,8 +52,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signIn: async (email, password) => {
     if (!isSupabaseConfigured) return 'Supabase 未設定'
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return error?.message ?? null
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) return error.message
+      if (data?.user) {
+        const profile = await getOrCreateProfile(data.user.id)
+        set({ user: profile })
+      }
+      return null
+    } catch (e: any) {
+      return e?.message || '登入失敗'
+    }
   },
 
   signUp: async (email, password, name) => {
@@ -83,33 +97,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 }))
 
 async function getOrCreateProfile(userId: string): Promise<Profile | null> {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single()
+  try {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle()
 
-  if (profile) return profile as Profile
+    if (error) {
+      console.error('查詢 profile 失敗:', error.message)
+    }
 
-  const { data: userData } = await supabase.auth.getUser()
-  if (!userData?.user) return null
+    if (profile) return profile as Profile
 
-  const newProfile: Profile = {
-    id: userId,
-    email: userData.user.email ?? '',
-    name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '使用者',
-    role: 'student',
-    stars: 0,
-    class_id: null,
-    student_id: null,
-    avatar_url: null,
-    created_at: new Date().toISOString()
-  }
+    const { data: userData } = await supabase.auth.getUser()
+    if (!userData?.user) return null
 
-  const { error } = await supabase.from('profiles').insert(newProfile)
-  if (error) {
-    console.error('建立 profile 失敗:', error.message)
+    const newProfile: Profile = {
+      id: userId,
+      email: userData.user.email ?? '',
+      name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '使用者',
+      role: 'student',
+      stars: 0,
+      class_id: null,
+      student_id: null,
+      avatar_url: null,
+      created_at: new Date().toISOString()
+    }
+
+    const { error: insertError } = await supabase.from('profiles').insert(newProfile)
+    if (insertError) {
+      console.error('建立 profile 失敗:', insertError.message)
+      return null
+    }
+    return newProfile
+  } catch (e) {
+    console.error('getOrCreateProfile 錯誤:', e)
     return null
   }
-  return newProfile
 }
