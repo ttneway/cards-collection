@@ -37,6 +37,20 @@ export interface Class {
   created_at: string
 }
 
+export interface StudentRoster {
+  id: string
+  name: string
+  student_no: string
+  email: string | null
+  role: Exclude<Role, 'teacher'>
+  title: string | null
+  class_id: string | null
+  scan_code: string
+  points: number
+  created_by: string
+  created_at: string
+}
+
 export interface ClassLeader {
   id: string
   class_id: string

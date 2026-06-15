@@ -19,7 +19,7 @@ interface CompletionRow {
   id: string
   completed_at: string
   period_key: string | null
-  user?: { name: string; student_id: string | null }
+  user?: { name: string; student_id?: string | null; student_no?: string | null }
   awarded_by_profile?: { name: string }
 }
 
@@ -76,14 +76,26 @@ export default function TeacherTasksPage() {
   }
 
   const loadCompletions = async (taskId: string) => {
-    const { data } = await supabase
+    const { data: profileRows } = await supabase
       .from('task_completions')
       .select('id, completed_at, period_key, user:user_id(name, student_id), awarded_by_profile:awarded_by(name)')
       .eq('task_id', taskId)
       .eq('status', 'approved')
       .order('completed_at', { ascending: false })
       .limit(100)
-    setCompletions((data ?? []) as any)
+
+    const { data: rosterRows } = await supabase
+      .from('roster_task_completions')
+      .select('id, completed_at, period_key, user:roster_student_id(name, student_no), awarded_by_profile:awarded_by(name)')
+      .eq('task_id', taskId)
+      .eq('status', 'approved')
+      .order('completed_at', { ascending: false })
+      .limit(100)
+
+    setCompletions([
+      ...((profileRows ?? []) as any),
+      ...((rosterRows ?? []) as any)
+    ].sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime()).slice(0, 100))
   }
 
   const createTask = async (event: React.FormEvent) => {
@@ -132,7 +144,7 @@ export default function TeacherTasksPage() {
     downloadCsv(`${selectedTask.title}-records.csv`, completions.map(row => ({
       task: selectedTask.title,
       student: row.user?.name,
-      student_id: row.user?.student_id,
+      student_id: row.user?.student_id ?? row.user?.student_no,
       period: row.period_key,
       awarded_by: row.awarded_by_profile?.name,
       completed_at: row.completed_at
@@ -238,7 +250,7 @@ export default function TeacherTasksPage() {
                 <div key={row.id} className="flex justify-between gap-3 bg-slate-700/50 rounded-lg px-3 py-2">
                   <div>
                     <p className="text-sm font-medium">{row.user?.name}</p>
-                    <p className="text-xs text-slate-400">{row.user?.student_id || '無學號'} · {row.period_key}</p>
+                    <p className="text-xs text-slate-400">{row.user?.student_id ?? row.user?.student_no ?? '無學號'} · {row.period_key}</p>
                   </div>
                   <p className="text-xs text-slate-400">{new Date(row.completed_at).toLocaleString()}</p>
                 </div>
