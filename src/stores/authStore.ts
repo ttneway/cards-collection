@@ -128,7 +128,7 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     throw new Error('登入成功，但無法取得登入使用者資料。')
   }
 
-  const newProfile: Profile = {
+  const newProfile = {
     id: userId,
     email: userData.user.email ?? '',
     name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '使用者',
@@ -140,9 +140,13 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     created_at: new Date().toISOString()
   }
 
-  const { error: insertError } = await supabase.from('profiles').insert(newProfile)
+  const { data: insertedProfile, error: insertError } = await supabase
+    .from('profiles')
+    .insert(newProfile)
+    .select('*')
+    .single()
   if (insertError) {
     throw new Error(`建立使用者資料失敗：${insertError.message}`)
   }
-  return newProfile
+  return insertedProfile as Profile
 }

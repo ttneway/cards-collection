@@ -14,6 +14,8 @@ import ProfilePage from './pages/ProfilePage'
 import TradesPage from './pages/TradesPage'
 import LeaderPage from './pages/LeaderPage'
 import TeacherPage from './pages/TeacherPage'
+import ScanStationPage from './pages/ScanStationPage'
+import TeacherTasksPage from './pages/TeacherTasksPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore()
@@ -86,7 +88,15 @@ export default function App() {
         <Route path="cards/mine" element={<MyCardsPage />} />
         <Route path="cards/packs" element={<ShopPage />} />
         <Route path="tasks" element={<TasksPage />} />
-        <Route path="scan" element={<ScanPage />} />
+        <Route
+          path="scan"
+          element={
+            <RoleRoute roles={['leader', 'teacher']}>
+              <ScanStationPage />
+            </RoleRoute>
+          }
+        />
+        <Route path="scan/camera" element={<ScanPage />} />
         <Route path="achievements" element={<AchievementsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="trades" element={<TradesPage />} />
@@ -103,6 +113,14 @@ export default function App() {
           element={
             <RoleRoute roles={['teacher']}>
               <TeacherPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="teacher/tasks"
+          element={
+            <RoleRoute roles={['leader', 'teacher']}>
+              <TeacherTasksPage />
             </RoleRoute>
           }
         />

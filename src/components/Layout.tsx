@@ -13,10 +13,11 @@ const navItems = [
   { to: '/cards/mine', icon: CreditCard, label: '我的牌庫', roles: ['student', 'leader', 'teacher'] },
   { to: '/cards/packs', icon: ShoppingBag, label: '商店', roles: ['student', 'leader', 'teacher'] },
   { to: '/tasks', icon: ListChecks, label: '任務', roles: ['student', 'leader', 'teacher'] },
-  { to: '/scan', icon: Camera, label: '掃碼', roles: ['student', 'leader', 'teacher'] },
+  { to: '/scan', icon: Camera, label: '發點', roles: ['leader', 'teacher'] },
   { to: '/achievements', icon: Trophy, label: '成就', roles: ['student', 'leader', 'teacher'] },
   { to: '/trades', icon: ArrowLeftRight, label: '交換', roles: ['student', 'leader', 'teacher'] },
   { to: '/leader', icon: ShieldCheck, label: '幹部面板', roles: ['leader', 'teacher'] },
+  { to: '/teacher/tasks', icon: Sparkles, label: '任務管理', roles: ['leader', 'teacher'] },
   { to: '/teacher', icon: Sparkles, label: '教師後台', roles: ['teacher'] },
 ]
 
@@ -83,5 +84,4 @@ export default function Layout() {
     </div>
   )
 }
-
 

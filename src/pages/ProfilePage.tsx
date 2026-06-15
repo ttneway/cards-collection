@@ -4,24 +4,35 @@ import { useAuthStore } from '../stores/authStore'
 import { User, Star, Trophy, CreditCard, LogOut } from 'lucide-react'
 import { ROLE_LABELS } from '../lib/constants'
 import { useNavigate } from 'react-router-dom'
+import BarcodeLabel from '../components/BarcodeLabel'
+
+interface TransactionRow {
+  id: string
+  amount: number
+  description: string
+  created_at: string
+}
 
 export default function ProfilePage() {
   const { user, signOut } = useAuthStore()
   const navigate = useNavigate()
   const [stats, setStats] = useState({ cards: 0, achievements: 0, tasks: 0 })
+  const [transactions, setTransactions] = useState<TransactionRow[]>([])
 
   useEffect(() => {
     if (!user) return
     Promise.all([
       supabase.from('user_cards').select('count', { count: 'exact' }).eq('user_id', user.id),
       supabase.from('user_achievements').select('count', { count: 'exact' }).eq('user_id', user.id),
-      supabase.from('task_completions').select('count', { count: 'exact' }).eq('user_id', user.id)
-    ]).then(([cards, achievements, tasks]) => {
+      supabase.from('task_completions').select('count', { count: 'exact' }).eq('user_id', user.id),
+      supabase.from('transactions').select('id, amount, description, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10)
+    ]).then(([cards, achievements, tasks, tx]) => {
       setStats({
         cards: cards.count ?? 0,
         achievements: achievements.count ?? 0,
         tasks: tasks.count ?? 0
       })
+      setTransactions((tx.data ?? []) as TransactionRow[])
     })
   }, [user])
 
@@ -56,6 +67,8 @@ export default function ProfilePage() {
         )}
       </div>
 
+      <BarcodeLabel value={user.scan_code} label="我的身分條碼" />
+
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-slate-800 rounded-xl p-4 text-center">
           <CreditCard size={20} className="mx-auto mb-1 text-indigo-400" />
@@ -80,6 +93,27 @@ export default function ProfilePage() {
       >
         <LogOut size={18} /> 登出
       </button>
+
+      <div className="bg-slate-800 rounded-xl p-4">
+        <h2 className="font-semibold mb-3">最近點數紀錄</h2>
+        {transactions.length === 0 ? (
+          <p className="text-sm text-slate-500 text-center py-4">尚無點數紀錄</p>
+        ) : (
+          <div className="space-y-2">
+            {transactions.map(tx => (
+              <div key={tx.id} className="flex justify-between gap-3 bg-slate-700/50 rounded-lg px-3 py-2">
+                <div>
+                  <p className="text-sm">{tx.description}</p>
+                  <p className="text-xs text-slate-400">{new Date(tx.created_at).toLocaleString()}</p>
+                </div>
+                <span className={tx.amount >= 0 ? 'text-amber-400 font-semibold' : 'text-red-400 font-semibold'}>
+                  {tx.amount >= 0 ? '+' : ''}{tx.amount}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

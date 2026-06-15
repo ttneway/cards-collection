@@ -4,6 +4,8 @@ export type Rarity = 'N' | 'R' | 'SR' | 'SSR' | 'UR'
 
 export type TaskType = 'scan' | 'approve' | 'auto'
 
+export type TaskRecurrenceType = 'once' | 'daily' | 'weekly' | 'semester' | 'custom'
+
 export type TradeStatus = 'pending' | 'approved' | 'rejected'
 
 export type AchievementConditionType =
@@ -19,9 +21,11 @@ export interface Profile {
   name: string
   student_id: string | null
   role: Role
+  title: string | null
   class_id: string | null
   stars: number
   avatar_url: string | null
+  scan_code: string | null
   created_at: string
 }
 
@@ -89,6 +93,10 @@ export interface Task {
   task_code: string | null
   created_by: string
   class_id: string | null
+  recurrence_type: TaskRecurrenceType
+  custom_reset_days: number | null
+  per_period_limit: number
+  code_format: 'code128' | 'qr' | 'both'
   is_active: boolean
   max_completions: number | null
   starts_at: string | null
@@ -108,7 +116,27 @@ export interface TaskCompletion {
   user_id: string
   completed_at: string
   approved_by: string | null
+  awarded_by: string | null
+  session_id: string | null
+  period_key: string | null
   status: 'pending' | 'approved' | 'rejected'
+}
+
+export interface TaskSession {
+  id: string
+  task_id: string
+  actor_id: string
+  is_active: boolean
+  opened_at: string
+  closed_at: string | null
+  task?: Task
+}
+
+export interface ScanResolution {
+  code_type: 'student' | 'task' | 'function'
+  target_id: string
+  label: string
+  action: string | null
 }
 
 export interface Achievement {

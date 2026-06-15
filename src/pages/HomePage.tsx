@@ -54,10 +54,10 @@ export default function HomePage() {
           <TrendingUp size={18} className="text-indigo-400" /> 快速功能
         </h2>
         <div className="grid grid-cols-2 gap-3">
-          <Link to="/scan" className="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 text-center no-underline text-white transition-colors">
+          <Link to={user?.role === 'student' ? '/profile' : '/scan'} className="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 text-center no-underline text-white transition-colors">
             <Camera size={28} className="mx-auto mb-2 text-indigo-400" />
-            <p className="font-medium">掃碼領取</p>
-            <p className="text-xs text-slate-400">掃描 QR Code</p>
+            <p className="font-medium">{user?.role === 'student' ? '我的身分碼' : '發點工作站'}</p>
+            <p className="text-xs text-slate-400">{user?.role === 'student' ? '出示條碼領點' : '掃任務與學生碼'}</p>
           </Link>
           <Link to="/cards/packs" className="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 text-center no-underline text-white transition-colors">
             <Gift size={28} className="mx-auto mb-2 text-amber-400" />
