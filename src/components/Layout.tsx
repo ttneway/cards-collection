@@ -4,7 +4,7 @@ import { ROLE_LABELS } from '../lib/constants'
 import {
   LayoutDashboard, CreditCard, Library, ShoppingBag,
   ListChecks, Camera, Trophy, ArrowLeftRight,
-  UserCircle, ShieldCheck, LogOut, Sparkles, Star
+  UserCircle, ShieldCheck, LogOut, Sparkles, Star, Users
 } from 'lucide-react'
 
 const navItems = [
@@ -18,12 +18,14 @@ const navItems = [
   { to: '/trades', icon: ArrowLeftRight, label: '交換', roles: ['student', 'leader', 'teacher'] },
   { to: '/leader', icon: ShieldCheck, label: '幹部面板', roles: ['leader', 'teacher'] },
   { to: '/teacher/tasks', icon: Sparkles, label: '任務管理', roles: ['leader', 'teacher'] },
+  { to: '/teacher/students', icon: Users, label: '學生條碼', roles: ['teacher'] },
   { to: '/teacher', icon: Sparkles, label: '教師後台', roles: ['teacher'] },
 ]
 
 export default function Layout() {
   const { user, signOut, hasRole } = useAuthStore()
   const navigate = useNavigate()
+  const visibleNavItems = navItems.filter(item => hasRole(...item.roles as any))
 
   const handleSignOut = async () => {
     await signOut()
@@ -57,15 +59,32 @@ export default function Layout() {
         </div>
       </header>
 
-      <main className="flex-1 px-4 py-4 pb-24 max-w-3xl w-full mx-auto">
+      <aside className="hidden lg:block fixed left-0 top-[57px] bottom-0 w-56 bg-slate-900 border-r border-slate-800 z-40">
+        <nav className="p-3 space-y-1">
+          {visibleNavItems.map(item => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-lg px-3 py-2 text-sm no-underline transition-colors ${
+                  isActive ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                }`
+              }
+            >
+              <item.icon size={18} />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+
+      <main className="flex-1 px-4 py-4 pb-24 max-w-3xl w-full mx-auto lg:ml-56 lg:max-w-5xl">
         <Outlet />
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-50">
+      <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-50 lg:hidden">
         <div className="flex overflow-x-auto px-2 py-1 max-w-3xl mx-auto">
-          {navItems
-            .filter(item => hasRole(...item.roles as any))
-            .map(item => (
+          {visibleNavItems.map(item => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -84,4 +103,3 @@ export default function Layout() {
     </div>
   )
 }
-

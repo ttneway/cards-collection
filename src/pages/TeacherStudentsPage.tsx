@@ -8,6 +8,13 @@ import type { Class, Profile, Role } from '../types'
 
 type EditableProfile = Pick<Profile, 'id' | 'email' | 'name' | 'student_id' | 'role' | 'title' | 'class_id' | 'scan_code' | 'stars'>
 
+const generateClientScanCode = (prefix = 'USR') => {
+  const bytes = new Uint8Array(12)
+  crypto.getRandomValues(bytes)
+  const code = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase()
+  return `${prefix}_${code}`
+}
+
 export default function TeacherStudentsPage() {
   const { user } = useAuthStore()
   const [students, setStudents] = useState<EditableProfile[]>([])
@@ -120,7 +127,25 @@ export default function TeacherStudentsPage() {
     setMessage(null)
     const { data, error } = await supabase.rpc('reset_profile_scan_code', { p_profile_id: draft.id })
     if (error) {
-      setError(error.message)
+      if (!error.message.includes('gen_random_bytes')) {
+        setError(error.message)
+        setSaving(false)
+        return
+      }
+
+      const fallbackCode = generateClientScanCode()
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ scan_code: fallbackCode })
+        .eq('id', draft.id)
+
+      if (updateError) {
+        setError(`資料庫亂數函式尚未修正，前端備援也失敗：${updateError.message}`)
+      } else {
+        setDraft({ ...draft, scan_code: fallbackCode })
+        setMessage('身分條碼已重設，舊條碼立即失效')
+        await loadStudents()
+      }
     } else {
       const newCode = data?.[0]?.scan_code
       setDraft({ ...draft, scan_code: newCode ?? draft.scan_code })
