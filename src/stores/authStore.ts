@@ -3,6 +3,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import type { Profile, Role } from '../types'
 
 let profileChannel: ReturnType<typeof supabase.channel> | null = null
+type LoginMode = 'email' | 'name' | 'scan_code'
 
 interface AuthState {
   user: Profile | null
@@ -10,7 +11,7 @@ interface AuthState {
   initialized: boolean
   configError: boolean
   initialize: () => Promise<void>
-  signIn: (email: string, password: string) => Promise<string | null>
+  signIn: (identifier: string, password: string, mode?: LoginMode) => Promise<string | null>
   signUp: (email: string, password: string, name: string) => Promise<string | null>
   signOut: () => Promise<void>
   hasRole: (...roles: Role[]) => boolean
@@ -62,9 +63,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     })
   },
 
-  signIn: async (email, password) => {
+  signIn: async (identifier, password, mode = 'email') => {
     if (!isSupabaseConfigured) return 'Supabase 未設定'
     try {
+      const email = mode === 'email'
+        ? identifier.trim()
+        : await resolveLoginIdentifier(identifier, mode)
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) return error.message
       if (data?.user) {
@@ -181,4 +185,27 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     throw new Error(`建立使用者資料失敗：${insertError.message}`)
   }
   return insertedProfile as Profile
+}
+
+async function resolveLoginIdentifier(identifier: string, mode: LoginMode): Promise<string> {
+  const value = identifier.trim()
+  if (!value) {
+    throw new Error('請先輸入登入資訊')
+  }
+
+  const { data, error } = await supabase.rpc('resolve_login_identifier', {
+    p_identifier: value,
+    p_mode: mode
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  const resolvedEmail = data?.[0]?.email as string | undefined
+  if (!resolvedEmail) {
+    throw new Error('找不到可登入的帳號')
+  }
+
+  return resolvedEmail
 }
