@@ -20,7 +20,6 @@ const getCurrentPeriodKey = (task: Task) => {
   const getPart = (type: string) => taipei.find(part => part.type === type)?.value ?? ''
   const year = Number(getPart('year'))
   const month = Number(getPart('month'))
-  const day = Number(getPart('day'))
 
   if (task.recurrence_type === 'daily') {
     return `${year}-${getPart('month')}-${getPart('day')}`
