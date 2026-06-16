@@ -4,7 +4,7 @@ import { useAuthStore } from '../stores/authStore'
 import { CheckCircle2, XCircle, Clock, Star } from 'lucide-react'
 
 export default function LeaderPage() {
-  const { user } = useAuthStore()
+  const { user, refreshProfile } = useAuthStore()
   const [pendingCompletions, setPendingCompletions] = useState<any[]>([])
 
   useEffect(() => {
@@ -26,6 +26,7 @@ export default function LeaderPage() {
       .update({ status: 'approved', approved_by: user?.id })
       .eq('id', completionId)
     await supabase.rpc('award_task_points', { p_user_id: userId, p_task_id: taskId })
+    if (userId === user?.id) await refreshProfile()
     loadPending()
   }
 

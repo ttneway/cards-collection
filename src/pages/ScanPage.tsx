@@ -5,7 +5,7 @@ import { useScanner } from '../utils/scanner'
 import { Camera, ScanLine } from 'lucide-react'
 
 export default function ScanPage() {
-  const { user } = useAuthStore()
+  const { user, refreshProfile } = useAuthStore()
   const { result, error, scanning, startScanning, stopScanning } = useScanner()
   const [taskCode, setTaskCode] = useState('')
   const [claiming, setClaiming] = useState(false)
@@ -50,6 +50,7 @@ export default function ScanPage() {
     } else {
       if (task.type === 'scan') {
         await supabase.rpc('award_task_points', { p_user_id: user.id, p_task_id: task.id })
+        await refreshProfile()
         setMessage(`成功領取任務「${task.title}」，獲得 ${task.points} 星星！`)
       } else {
         setMessage(`成功提交任務「${task.title}」，待審核中`)

@@ -5,7 +5,7 @@ import { ShoppingBag, Star } from 'lucide-react'
 import type { CardPack } from '../types'
 
 export default function ShopPage() {
-  const { user } = useAuthStore()
+  const { user, refreshProfile } = useAuthStore()
   const [packs, setPacks] = useState<CardPack[]>([])
   const [buying, setBuying] = useState<string | null>(null)
 
@@ -25,6 +25,7 @@ export default function ShopPage() {
     if (error) {
       alert(error.message)
     } else {
+      await refreshProfile()
       alert('抽卡成功！')
     }
     setBuying(null)

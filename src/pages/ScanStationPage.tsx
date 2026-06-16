@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ScanLine, Power, UserCheck, AlertCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useAuthStore } from '../stores/authStore'
 import type { ScanResolution } from '../types'
 
 interface ActiveSession {
@@ -21,6 +22,7 @@ interface AwardLog {
 
 export default function ScanStationPage() {
   const navigate = useNavigate()
+  const { refreshProfile } = useAuthStore()
   const inputRef = useRef<HTMLInputElement>(null)
   const [code, setCode] = useState('')
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
@@ -60,6 +62,7 @@ export default function ScanStationPage() {
     const result = data?.[0]
     if (!result) throw new Error('發點沒有回應')
 
+    await refreshProfile()
     setMessage(result.message)
     setLogs(previous => [
       {

@@ -4,7 +4,7 @@ import { useAuthStore } from '../stores/authStore'
 import type { Task } from '../types'
 
 export default function TasksPage() {
-  const { user } = useAuthStore()
+  const { user, refreshProfile } = useAuthStore()
   const [tasks, setTasks] = useState<(Task & { completed?: boolean })[]>([])
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set())
 
@@ -28,6 +28,7 @@ export default function TasksPage() {
     if (!error) {
       if (task.type === 'scan') {
         await supabase.rpc('award_task_points', { p_user_id: user.id, p_task_id: task.id })
+        await refreshProfile()
       }
       setCompletedIds(new Set([...completedIds, task.id]))
     }
