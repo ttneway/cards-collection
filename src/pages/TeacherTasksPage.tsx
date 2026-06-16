@@ -30,6 +30,8 @@ const emptyForm = {
   recurrence_type: 'daily' as TaskRecurrenceType,
   per_period_limit: 1,
   custom_reset_days: 7,
+  allow_scanner: true,
+  allow_button_claim: false,
   scan_window_enabled: false,
   window_start_time: '07:00',
   window_end_time: '08:00',
@@ -104,6 +106,10 @@ export default function TeacherTasksPage() {
   const createTask = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!user) return
+    if (!form.allow_scanner && !form.allow_button_claim) {
+      setError('至少要勾選一種任務完成方式。')
+      return
+    }
     setSaving(true)
     setError(null)
     setMessage(null)
@@ -119,6 +125,8 @@ export default function TeacherTasksPage() {
       recurrence_type: form.recurrence_type,
       custom_reset_days: form.recurrence_type === 'custom' ? Number(form.custom_reset_days) : null,
       per_period_limit: Number(form.per_period_limit),
+      allow_scanner: form.allow_scanner,
+      allow_button_claim: form.allow_button_claim,
       code_format: 'both',
       is_active: form.is_active
     }
@@ -211,6 +219,29 @@ export default function TeacherTasksPage() {
               <input type="number" min="1" value={form.custom_reset_days} onChange={event => setForm({ ...form, custom_reset_days: Number(event.target.value) })} className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500" />
             </div>
           )}
+          <div className="sm:col-span-2 space-y-2">
+            <label className="block text-sm text-slate-400">完成方式</label>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <label className="flex items-center gap-2 text-sm text-slate-300 bg-slate-700/50 rounded-lg px-3 py-2 border border-slate-600">
+                <input
+                  type="checkbox"
+                  checked={form.allow_scanner}
+                  onChange={event => setForm({ ...form, allow_scanner: event.target.checked })}
+                  className="accent-indigo-500"
+                />
+                使用掃描器
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-300 bg-slate-700/50 rounded-lg px-3 py-2 border border-slate-600">
+                <input
+                  type="checkbox"
+                  checked={form.allow_button_claim}
+                  onChange={event => setForm({ ...form, allow_button_claim: event.target.checked })}
+                  className="accent-indigo-500"
+                />
+                登入後按鈕完成
+              </label>
+            </div>
+          </div>
           <label className="flex items-center gap-2 text-sm text-slate-300 bg-slate-700/50 rounded-lg px-3 py-2 border border-slate-600">
             <input
               type="checkbox"
@@ -253,6 +284,8 @@ export default function TeacherTasksPage() {
                 <p className="text-sm text-slate-400">{task.description || '無描述'}</p>
                 <p className="text-xs text-slate-500 mt-1">
                   {task.points} 點 · {RECURRENCE_LABELS[task.recurrence_type]} · 每週期 {task.per_period_limit} 次
+                  {task.allow_scanner ? ' · 掃描器' : ''}
+                  {task.allow_button_claim ? ' · 按鈕完成' : ''}
                   {task.scan_window_enabled && task.window_start_time && task.window_end_time
                     ? ` · 限時 ${task.window_start_time.slice(0, 5)}-${task.window_end_time.slice(0, 5)}`
                     : ''}

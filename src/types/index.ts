@@ -110,6 +110,8 @@ export interface Task {
   recurrence_type: TaskRecurrenceType
   custom_reset_days: number | null
   per_period_limit: number
+  allow_scanner: boolean
+  allow_button_claim: boolean
   scan_window_enabled: boolean
   window_start_time: string | null
   window_end_time: string | null

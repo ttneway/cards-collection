@@ -39,22 +39,16 @@ export default function ScanPage() {
       return
     }
 
-    const { error: completeError } = await supabase.from('task_completions').insert({
-      task_id: task.id,
-      user_id: user.id,
-      status: task.type === 'scan' ? 'approved' : 'pending'
+    const { data, error: completeError } = await supabase.rpc('claim_task_by_user_action', {
+      p_task_id: task.id,
+      p_method: 'scanner'
     })
 
     if (completeError) {
-      setMessage('領取失敗，請稍後再試')
+      setMessage(completeError.message)
     } else {
-      if (task.type === 'scan') {
-        await supabase.rpc('award_task_points', { p_user_id: user.id, p_task_id: task.id })
-        await refreshProfile()
-        setMessage(`成功領取任務「${task.title}」，獲得 ${task.points} 星星！`)
-      } else {
-        setMessage(`成功提交任務「${task.title}」，待審核中`)
-      }
+      await refreshProfile()
+      setMessage(data?.[0]?.message ?? `成功提交任務「${task.title}」`)
     }
     setClaiming(false)
   }
