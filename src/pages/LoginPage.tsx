@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { Mail, ScanLine, Sparkles, UserRound } from 'lucide-react'
 
@@ -57,7 +57,7 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <Sparkles size={48} className="text-indigo-400 mx-auto mb-2" />
           <h1 className="text-2xl font-bold text-white">校園集卡牌</h1>
-          <p className="text-slate-400 text-sm mt-1">收集卡片 · 完成任務 · 解鎖成就</p>
+          <p className="text-slate-400 text-sm mt-1">收集卡片、完成任務、解鎖成就</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-slate-800 rounded-xl p-6 space-y-4">
@@ -109,7 +109,7 @@ export default function LoginPage() {
                     ? 'you@example.com'
                     : loginMode === 'name'
                       ? '請輸入姓名'
-                      : '請掃描或輸入身分條碼'
+                      : '請輸入或掃描身分條碼'
               }
               required
             />
@@ -137,8 +137,17 @@ export default function LoginPage() {
             {loading ? '處理中...' : isSignUp ? '註冊' : '登入'}
           </button>
 
+          {!isSignUp && (
+            <Link
+              to="/claim"
+              className="block w-full text-center bg-slate-700 hover:bg-slate-600 text-white rounded-lg py-2 font-medium no-underline"
+            >
+              免登入掃碼領取
+            </Link>
+          )}
+
           <p className="text-center text-sm text-slate-400">
-            {isSignUp ? '已有帳號？' : '沒有帳號？'}{' '}
+            {isSignUp ? '已經有帳號？' : '沒有帳號？'}{' '}
             <button
               type="button"
               onClick={() => { setIsSignUp(!isSignUp); setError(null) }}

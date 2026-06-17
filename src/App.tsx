@@ -52,13 +52,13 @@ export default function App() {
     return (
       <div className="flex items-center justify-center min-h-dvh bg-slate-900 px-4">
         <div className="text-center max-w-sm">
-          <p className="text-4xl mb-4">⚙️</p>
-          <h1 className="text-xl font-bold text-white mb-2">需要設定</h1>
+          <p className="text-4xl mb-4">⚠</p>
+          <h1 className="text-xl font-bold text-white mb-2">尚未設定環境變數</h1>
           <p className="text-slate-400 text-sm mb-4">
-            Supabase 環境變數尚未設定。
+            Supabase 連線資訊尚未設定。
             <br />
-            請在 GitHub Secrets 中設定 <code className="text-indigo-400">VITE_SUPABASE_URL</code> 與{' '}
-            <code className="text-indigo-400">VITE_SUPABASE_ANON_KEY</code>，然後重新部署。
+            請到 GitHub Secrets 設定 <code className="text-indigo-400">VITE_SUPABASE_URL</code> 和{' '}
+            <code className="text-indigo-400">VITE_SUPABASE_ANON_KEY</code>。
           </p>
           <a
             href="https://github.com/ttneway/cards-collection/settings/secrets/actions"
@@ -76,6 +76,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/auth" element={<LoginPage />} />
+      <Route path="/claim" element={<ScanPage />} />
+      <Route path="/scan/camera" element={<ScanPage />} />
       <Route
         path="/"
         element={
@@ -97,7 +99,6 @@ export default function App() {
             </RoleRoute>
           }
         />
-        <Route path="scan/camera" element={<ScanPage />} />
         <Route path="achievements" element={<AchievementsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="trades" element={<TradesPage />} />
