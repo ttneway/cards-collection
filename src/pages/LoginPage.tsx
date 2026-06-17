@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { Mail, ScanLine, Sparkles, UserRound } from 'lucide-react'
@@ -26,26 +26,48 @@ export default function LoginPage() {
     if (user) navigate('/')
   }, [navigate, user])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const identifierLabel = useMemo(() => {
+    if (isSignUp) return 'Email'
+    if (loginMode === 'name') return '姓名'
+    if (loginMode === 'scan_code') return '身分條碼'
+    return 'Email'
+  }, [isSignUp, loginMode])
+
+  const identifierPlaceholder = useMemo(() => {
+    if (isSignUp) return 'you@example.com'
+    if (loginMode === 'name') return '請輸入姓名'
+    if (loginMode === 'scan_code') return '請輸入或掃描身分條碼'
+    return 'you@example.com'
+  }, [isSignUp, loginMode])
+
+  const helperText = useMemo(() => {
+    if (isSignUp) return null
+    if (loginMode === 'name') return '若同名帳號超過一個，請改用 Email 登入。'
+    if (loginMode === 'scan_code') return '可直接使用掃描器輸入身分條碼。'
+    return '使用註冊時的 Email 與密碼登入。'
+  }, [isSignUp, loginMode])
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
     setError(null)
 
     if (isSignUp && password.length < 6) {
-      setError('密碼至少需要 6 個字元')
+      setError('密碼至少需要 6 個字元。')
       return
     }
 
     setLoading(true)
 
-    const err = isSignUp
+    const nextError = isSignUp
       ? await signUp(identifier, password, name)
       : await signIn(identifier, password, loginMode)
 
-    if (err) {
-      setError(err)
+    if (nextError) {
+      setError(nextError)
     } else {
       navigate('/')
     }
+
     setLoading(false)
   }
 
@@ -69,7 +91,11 @@ export default function LoginPage() {
                   <button
                     key={mode.id}
                     type="button"
-                    onClick={() => { setLoginMode(mode.id); setError(null) }}
+                    onClick={() => {
+                      setLoginMode(mode.id)
+                      setIdentifier('')
+                      setError(null)
+                    }}
                     className={`flex items-center justify-center gap-1 rounded-lg px-2 py-2 text-sm transition-colors ${
                       loginMode === mode.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'
                     }`}
@@ -81,48 +107,44 @@ export default function LoginPage() {
               })}
             </div>
           )}
+
           {isSignUp && (
             <div>
               <label className="block text-sm text-slate-400 mb-1">姓名</label>
               <input
                 type="text"
                 value={name}
-                onChange={e => setName(e.target.value)}
+                onChange={event => setName(event.target.value)}
                 className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 focus:border-indigo-500 outline-none"
                 required
               />
             </div>
           )}
+
           <div>
-            <label className="block text-sm text-slate-400 mb-1">
-              {isSignUp ? 'Email' : loginMode === 'email' ? 'Email' : loginMode === 'name' ? '姓名' : '身分條碼'}
-            </label>
+            <label className="block text-sm text-slate-400 mb-1">{identifierLabel}</label>
             <input
               type={isSignUp || loginMode === 'email' ? 'email' : 'text'}
               value={identifier}
-              onChange={e => setIdentifier(e.target.value)}
+              onChange={event => setIdentifier(event.target.value)}
               className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 focus:border-indigo-500 outline-none"
-              placeholder={
-                isSignUp
-                  ? 'you@example.com'
-                  : loginMode === 'email'
-                    ? 'you@example.com'
-                    : loginMode === 'name'
-                      ? '請輸入姓名'
-                      : '請輸入或掃描身分條碼'
-              }
+              placeholder={identifierPlaceholder}
               required
+              autoComplete={isSignUp || loginMode === 'email' ? 'email' : 'username'}
             />
+            {helperText && <p className="text-xs text-slate-500 mt-1">{helperText}</p>}
           </div>
+
           <div>
             <label className="block text-sm text-slate-400 mb-1">密碼</label>
             <input
               type="password"
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={event => setPassword(event.target.value)}
               className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 focus:border-indigo-500 outline-none"
               required
               minLength={6}
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
             />
             {isSignUp && <p className="text-xs text-slate-500 mt-1">至少 6 個字元</p>}
           </div>
@@ -150,7 +172,10 @@ export default function LoginPage() {
             {isSignUp ? '已經有帳號？' : '沒有帳號？'}{' '}
             <button
               type="button"
-              onClick={() => { setIsSignUp(!isSignUp); setError(null) }}
+              onClick={() => {
+                setIsSignUp(!isSignUp)
+                setError(null)
+              }}
               className="text-indigo-400 hover:underline cursor-pointer bg-transparent border-none"
             >
               {isSignUp ? '登入' : '註冊'}

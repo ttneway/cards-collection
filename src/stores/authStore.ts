@@ -40,8 +40,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ loading: false, initialized: true })
         unsubscribeFromProfileChanges()
       }
-    } catch (e) {
-      console.error('初始化失敗:', e)
+    } catch (error) {
+      console.error('初始化登入狀態失敗', error)
       set({ loading: false, initialized: true })
     }
 
@@ -51,8 +51,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           const profile = await getOrCreateProfile(session.user.id)
           set({ user: profile })
           subscribeToProfileChanges(profile.id, set)
-        } catch (e) {
-          console.error('更新登入狀態失敗:', e)
+        } catch (error) {
+          console.error('同步登入狀態失敗', error)
           set({ user: null })
           unsubscribeFromProfileChanges()
         }
@@ -64,33 +64,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signIn: async (identifier, password, mode = 'email') => {
-    if (!isSupabaseConfigured) return 'Supabase 未設定'
+    if (!isSupabaseConfigured) return 'Supabase 尚未設定。'
+
     try {
       const email = mode === 'email'
         ? identifier.trim()
         : await resolveLoginIdentifier(identifier, mode)
+
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) return error.message
+      if (error) return normalizeAuthError(error.message)
+
       if (data?.user) {
         const profile = await getOrCreateProfile(data.user.id)
         set({ user: profile })
         subscribeToProfileChanges(profile.id, set)
         return null
       }
-      return '登入失敗，請確認帳號或密碼是否正確'
-    } catch (e: any) {
-      return e?.message || '登入失敗'
+
+      return '登入失敗，請稍後再試。'
+    } catch (error: any) {
+      return normalizeAuthError(error?.message || '登入失敗。')
     }
   },
 
   signUp: async (email, password, name) => {
-    if (!isSupabaseConfigured) return 'Supabase 未設定'
+    if (!isSupabaseConfigured) return 'Supabase 尚未設定。'
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { name } }
     })
-    if (error) return error.message
+
+    if (error) return normalizeAuthError(error.message)
     return null
   },
 
@@ -113,8 +119,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const profile = await getOrCreateProfile(session.user.id)
         set({ user: profile })
         subscribeToProfileChanges(profile.id, set)
-      } catch (e) {
-        console.error('更新 profile 失敗:', e)
+      } catch (error) {
+        console.error('重新整理個人資料失敗', error)
         set({ user: null })
         unsubscribeFromProfileChanges()
       }
@@ -151,23 +157,23 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     .maybeSingle()
 
   if (error) {
-    throw new Error(`查詢使用者資料失敗：${error.message}`)
+    throw new Error(`讀取個人資料失敗：${error.message}`)
   }
 
   if (profile) return profile as Profile
 
   const { data: userData, error: userError } = await supabase.auth.getUser()
   if (userError) {
-    throw new Error(`取得登入使用者失敗：${userError.message}`)
+    throw new Error(`讀取登入使用者失敗：${userError.message}`)
   }
   if (!userData?.user) {
-    throw new Error('登入成功，但無法取得登入使用者資料。')
+    throw new Error('找不到目前登入的使用者。')
   }
 
   const newProfile = {
     id: userId,
     email: userData.user.email ?? '',
-    name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '使用者',
+    name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '未命名使用者',
     role: 'student',
     stars: 0,
     class_id: null,
@@ -181,16 +187,18 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     .insert(newProfile)
     .select('*')
     .single()
+
   if (insertError) {
-    throw new Error(`建立使用者資料失敗：${insertError.message}`)
+    throw new Error(`建立個人資料失敗：${insertError.message}`)
   }
+
   return insertedProfile as Profile
 }
 
 async function resolveLoginIdentifier(identifier: string, mode: LoginMode): Promise<string> {
   const value = identifier.trim()
   if (!value) {
-    throw new Error('請先輸入登入資訊')
+    throw new Error('請輸入登入資訊。')
   }
 
   const { data, error } = await supabase.rpc('resolve_login_identifier', {
@@ -199,13 +207,31 @@ async function resolveLoginIdentifier(identifier: string, mode: LoginMode): Prom
   })
 
   if (error) {
-    throw new Error(error.message)
+    throw new Error(normalizeAuthError(error.message))
   }
 
   const resolvedEmail = data?.[0]?.email as string | undefined
   if (!resolvedEmail) {
-    throw new Error('找不到可登入的帳號')
+    throw new Error('找不到可登入的帳號。')
   }
 
   return resolvedEmail
+}
+
+function normalizeAuthError(message: string) {
+  const value = message.trim()
+
+  if (value === 'Invalid login credentials') {
+    return '帳號或密碼錯誤。'
+  }
+
+  if (value.includes('Email not confirmed')) {
+    return '這個帳號尚未完成 Email 驗證。'
+  }
+
+  if (value.includes('duplicate key value')) {
+    return '這個帳號資料已存在，請改用登入。'
+  }
+
+  return value
 }
