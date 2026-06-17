@@ -1,74 +1,46 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
-import type { Task } from '../types'
-
-interface CompletionStatusRow {
-  task_id: string
-  period_key: string | null
-}
-
-const getCurrentPeriodKey = (task: Task) => {
-  const now = new Date()
-  const taipei = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Taipei',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(now)
-
-  const getPart = (type: string) => taipei.find(part => part.type === type)?.value ?? ''
-  const year = Number(getPart('year'))
-  const month = Number(getPart('month'))
-
-  if (task.recurrence_type === 'daily') {
-    return `${year}-${getPart('month')}-${getPart('day')}`
-  }
-
-  if (task.recurrence_type === 'weekly') {
-    const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', weekday: 'short' }).format(now)
-    const weekdayOffset = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday)
-    const mondayOffset = weekdayOffset === 0 ? -6 : 1 - weekdayOffset
-    const monday = new Date(now)
-    monday.setDate(now.getDate() + mondayOffset)
-    const weekYear = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric' }).format(monday)
-    const firstThursday = new Date(Date.UTC(Number(weekYear), 0, 4))
-    const currentThursday = new Date(monday)
-    currentThursday.setDate(monday.getDate() + 3)
-    const diffDays = Math.floor((currentThursday.getTime() - firstThursday.getTime()) / 86400000)
-    const week = String(1 + Math.floor(diffDays / 7)).padStart(2, '0')
-    return `${weekYear}-W${week}`
-  }
-
-  if (task.recurrence_type === 'semester') {
-    return `${year}-${month >= 2 && month <= 7 ? 'S2' : 'S1'}`
-  }
-
-  if (task.recurrence_type === 'custom') {
-    const days = Math.max(task.custom_reset_days ?? 1, 1)
-    return `C${Math.floor(Date.now() / (days * 86400000))}`
-  }
-
-  return 'once'
-}
+import type { Task, TaskClaimStatus } from '../types'
 
 export default function TasksPage() {
   const { user, refreshProfile } = useAuthStore()
   const [tasks, setTasks] = useState<Task[]>([])
-  const [completedRows, setCompletedRows] = useState<CompletionStatusRow[]>([])
+  const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskClaimStatus>>({})
   const [claimingTaskId, setClaimingTaskId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user) return
-    supabase.from('tasks').select('*').eq('is_active', true).order('created_at', { ascending: false }).then(({ data }) => {
-      if (data) setTasks(data as Task[])
-    })
-    supabase.from('task_completions').select('task_id, period_key').eq('user_id', user.id).then(({ data }) => {
-      if (data) setCompletedRows(data as CompletionStatusRow[])
-    })
+    loadTasks()
+    loadTaskStatuses()
   }, [user])
+
+  const loadTasks = async () => {
+    const { data } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+    if (data) setTasks(data as Task[])
+  }
+
+  const loadTaskStatuses = async () => {
+    const { data, error } = await supabase.rpc('get_my_task_claim_statuses')
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    const rows = (data ?? []) as TaskClaimStatus[]
+    setTaskStatuses(
+      rows.reduce<Record<string, TaskClaimStatus>>((accumulator, row) => {
+        accumulator[row.task_id] = row
+        return accumulator
+      }, {})
+    )
+  }
 
   const claimTask = async (task: Task) => {
     if (!user) return
@@ -84,10 +56,9 @@ export default function TasksPage() {
     if (error) {
       setError(error.message)
     } else {
-      const result = data?.[0]
       await refreshProfile()
-      setCompletedRows(previous => [...previous, { task_id: task.id, period_key: result?.period_key ?? getCurrentPeriodKey(task) }])
-      setMessage(result?.message ?? `已完成任務「${task.title}」`)
+      await loadTaskStatuses()
+      setMessage(data?.[0]?.message ?? `已完成任務「${task.title}」`)
     }
     setClaimingTaskId(null)
   }
@@ -105,8 +76,8 @@ export default function TasksPage() {
       ) : (
         <div className="grid gap-3">
           {tasks.map(task => {
-            const currentPeriodKey = getCurrentPeriodKey(task)
-            const done = completedRows.some(row => row.task_id === task.id && (row.period_key ?? 'once') === currentPeriodKey)
+            const status = taskStatuses[task.id]
+            const done = (status?.claim_count ?? 0) >= Math.max(task.per_period_limit, 1)
             return (
               <div key={task.id} className={`bg-slate-800 rounded-xl p-4 ${done ? 'opacity-50' : ''}`}>
                 <div className="flex items-start justify-between">

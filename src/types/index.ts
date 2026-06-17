@@ -142,6 +142,13 @@ export interface TaskCompletion {
   status: 'pending' | 'approved' | 'rejected'
 }
 
+export interface TaskClaimStatus {
+  task_id: string
+  period_key: string
+  claim_count: number
+  latest_completed_at: string | null
+}
+
 export interface TaskSession {
   id: string
   task_id: string
