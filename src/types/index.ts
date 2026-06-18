@@ -110,6 +110,7 @@ export interface Task {
   recurrence_type: TaskRecurrenceType
   custom_reset_days: number | null
   per_period_limit: number
+  claim_cooldown_minutes: number
   allow_scanner: boolean
   allow_button_claim: boolean
   scan_window_enabled: boolean
@@ -147,6 +148,8 @@ export interface TaskClaimStatus {
   period_key: string
   claim_count: number
   latest_completed_at: string | null
+  next_claim_at: string | null
+  cooldown_remaining_seconds: number
 }
 
 export interface TaskSession {
