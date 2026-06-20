@@ -9,11 +9,11 @@ export const RARITY_COLORS: Record<string, string> = {
 }
 
 export const RARITY_LABELS: Record<string, string> = {
-  N: '普通',
-  R: '稀有',
-  SR: '超稀有',
-  SSR: '傳說',
-  UR: '典藏'
+  N: '\u666e\u901a',
+  R: '\u7a00\u6709',
+  SR: '\u8d85\u7a00\u6709',
+  SSR: '\u50b3\u8aaa',
+  UR: '\u5178\u85cf'
 }
 
 export function formatRarityLabel(rarity: string) {
@@ -21,8 +21,8 @@ export function formatRarityLabel(rarity: string) {
 }
 
 export const ROLE_LABELS: Record<string, string> = {
-  student: '學生',
-  leader: '幹部',
-  teacher: '教師',
-  admin: '管理者'
+  student: '\u5b78\u751f',
+  leader: '\u5e79\u90e8',
+  teacher: '\u6559\u5e2b',
+  admin: '\u7ba1\u7406\u8005'
 }
