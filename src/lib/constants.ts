@@ -16,6 +16,10 @@ export const RARITY_LABELS: Record<string, string> = {
   UR: '典藏'
 }
 
+export function formatRarityLabel(rarity: string) {
+  return `${RARITY_LABELS[rarity] ?? rarity} (${rarity})`
+}
+
 export const ROLE_LABELS: Record<string, string> = {
   student: '學生',
   leader: '幹部',

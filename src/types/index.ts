@@ -98,6 +98,14 @@ export interface PackContent {
   card?: Card
 }
 
+export interface PackRarityOdds {
+  pack_id: string
+  rarity: Rarity
+  card_count: number
+  total_weight: number
+  probability_percent: number
+}
+
 export interface Task {
   id: string
   title: string
