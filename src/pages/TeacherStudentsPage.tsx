@@ -13,7 +13,7 @@ const emptyStudentForm = {
   name: '',
   student_no: '',
   email: '',
-  role: 'student' as Exclude<Role, 'teacher'>,
+  role: 'student' as Exclude<Role, 'teacher' | 'admin'>,
   title: '',
   class_id: ''
 }
@@ -211,7 +211,7 @@ export default function TeacherStudentsPage() {
         const [studentNo, name, className = '', gradeText = '1', email = '', title = '', roleText = 'student'] = row
         if (!studentNo || !name) continue
         const classId = className ? await findOrCreateClass(className, Number(gradeText) || 1) : null
-        const role: Exclude<Role, 'teacher'> = roleText === 'leader' || roleText.includes('幹') || roleText.includes('小老師') ? 'leader' : 'student'
+        const role: Exclude<Role, 'teacher' | 'admin'> = roleText === 'leader' || roleText.includes('幹') || roleText.includes('小老師') ? 'leader' : 'student'
 
         const { error } = await supabase.from('student_rosters').upsert({
           name,
@@ -293,7 +293,7 @@ export default function TeacherStudentsPage() {
               <option value="">未分班</option>
               {classes.map(item => <option key={item.id} value={item.id}>{item.grade} 年級 · {item.name}</option>)}
             </select>
-            <select value={studentForm.role} onChange={event => setStudentForm({ ...studentForm, role: event.target.value as Exclude<Role, 'teacher'> })} className="bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500">
+            <select value={studentForm.role} onChange={event => setStudentForm({ ...studentForm, role: event.target.value as Exclude<Role, 'teacher' | 'admin'> })} className="bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500">
               <option value="student">學生</option>
               <option value="leader">幹部/小老師</option>
             </select>
@@ -368,7 +368,7 @@ export default function TeacherStudentsPage() {
                 </div>
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">角色</label>
-                  <select value={draft.role} onChange={event => setDraft({ ...draft, role: event.target.value as Exclude<Role, 'teacher'> })} className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500">
+                  <select value={draft.role} onChange={event => setDraft({ ...draft, role: event.target.value as Exclude<Role, 'teacher' | 'admin'> })} className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 border border-slate-600 outline-none focus:border-indigo-500">
                     <option value="student">學生</option>
                     <option value="leader">幹部/小老師</option>
                   </select>

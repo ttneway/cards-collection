@@ -109,6 +109,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hasRole: (...roles: Role[]) => {
     const { user } = get()
     if (!user) return false
+    if (user.role === 'admin') return true
     return roles.includes(user.role)
   },
 

@@ -12,12 +12,13 @@ export const RARITY_LABELS: Record<string, string> = {
   N: '普通',
   R: '稀有',
   SR: '超稀有',
-  SSR: '極稀有',
-  UR: '傳說'
+  SSR: '傳說',
+  UR: '典藏'
 }
 
 export const ROLE_LABELS: Record<string, string> = {
   student: '學生',
   leader: '幹部',
-  teacher: '教師'
+  teacher: '教師',
+  admin: '管理者'
 }

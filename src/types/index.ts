@@ -1,4 +1,4 @@
-export type Role = 'student' | 'leader' | 'teacher'
+export type Role = 'student' | 'leader' | 'teacher' | 'admin'
 
 export type Rarity = 'N' | 'R' | 'SR' | 'SSR' | 'UR'
 
@@ -42,7 +42,7 @@ export interface StudentRoster {
   name: string
   student_no: string
   email: string | null
-  role: Exclude<Role, 'teacher'>
+  role: Exclude<Role, 'teacher' | 'admin'>
   title: string | null
   class_id: string | null
   scan_code: string
