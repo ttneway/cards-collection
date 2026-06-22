@@ -71,6 +71,7 @@ export interface StudentRoster {
   id: string
   name: string
   student_no: string
+  seat_no: number | null
   email: string | null
   role: Exclude<Role, 'teacher' | 'admin'>
   title: string | null
