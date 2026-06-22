@@ -15,6 +15,8 @@ export type AchievementConditionType =
   | 'series_complete'
   | 'rarity_collection'
 
+export type AnnouncementCategory = 'system' | 'task'
+
 export interface Profile {
   id: string
   email: string
@@ -42,6 +44,19 @@ export interface DrawAnnouncement {
   card_color: string
   created_at: string
   expires_at: string
+}
+
+export interface Announcement {
+  id: string
+  title: string
+  body: string
+  category: AnnouncementCategory
+  source_task_id: string | null
+  created_by: string | null
+  auto_created: boolean
+  is_pinned: boolean
+  expires_at: string | null
+  created_at: string
 }
 
 export interface Class {

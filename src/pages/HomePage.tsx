@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Camera, Gift, Sparkles, TrendingUp } from 'lucide-react'
+import { Bell, Camera, Gift, Sparkles, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
+import type { Announcement } from '../types'
 
 interface HomeData {
   cardCount: number
@@ -17,33 +18,101 @@ interface HomeData {
 export default function HomePage() {
   const { user } = useAuthStore()
   const [data, setData] = useState<HomeData>({ cardCount: 0, achievementCount: 0, recentCards: [] })
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
 
   useEffect(() => {
     if (!user) return
 
-    Promise.all([
-      supabase.from('user_cards').select('count', { count: 'exact' }).eq('user_id', user.id),
-      supabase.from('user_achievements').select('count', { count: 'exact' }).eq('user_id', user.id),
-      supabase
-        .from('user_cards')
-        .select('card:card_id(id, name, color)')
-        .eq('user_id', user.id)
-        .order('acquired_at', { ascending: false })
-        .limit(4)
-    ]).then(([cards, achievements, recent]) => {
+    const loadHomeData = async () => {
+      const [cards, achievements, recent] = await Promise.all([
+        supabase.from('user_cards').select('count', { count: 'exact' }).eq('user_id', user.id),
+        supabase.from('user_achievements').select('count', { count: 'exact' }).eq('user_id', user.id),
+        supabase
+          .from('user_cards')
+          .select('card:card_id(id, name, color)')
+          .eq('user_id', user.id)
+          .order('acquired_at', { ascending: false })
+          .limit(4)
+      ])
+
       setData({
         cardCount: cards.count ?? 0,
         achievementCount: achievements.count ?? 0,
         recentCards: (recent.data ?? []).map((row: any) => row.card).filter(Boolean)
       })
-    })
-  }, [user])
+    }
+
+    const loadAnnouncements = async () => {
+      const { data, error } = await supabase.rpc('get_home_announcements')
+      if (!error && data) {
+        setAnnouncements(data as Announcement[])
+      }
+    }
+
+    void Promise.all([loadHomeData(), loadAnnouncements()])
+
+    const channel = supabase
+      .channel(`home-announcements-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+        void loadAnnouncements()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id])
 
   return (
     <div className="space-y-6">
       <div className="py-6 text-center">
         <h1 className="text-2xl font-bold text-white">歡迎回來，{user?.name}</h1>
         <p className="mt-1 text-slate-400">今天也來累積點數、完成任務、收集新卡片。</p>
+      </div>
+
+      <div className="rounded-2xl border border-slate-700 bg-slate-800 p-4">
+        <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-white">
+          <Bell size={18} className="text-amber-400" /> 最新公告
+        </h2>
+
+        {announcements.length === 0 ? (
+          <p className="rounded-xl bg-slate-900/40 px-4 py-6 text-center text-sm text-slate-500">
+            目前還沒有公告。
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {announcements.map(item => (
+              <div key={item.id} className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          item.category === 'task'
+                            ? 'bg-indigo-500/10 text-indigo-300'
+                            : 'bg-amber-500/10 text-amber-300'
+                        }`}
+                      >
+                        {item.category === 'task' ? '任務公告' : '系統公告'}
+                      </span>
+                      {item.is_pinned ? (
+                        <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-300">
+                          置頂
+                        </span>
+                      ) : null}
+                    </div>
+                    <h3 className="mt-2 font-semibold text-white">{item.title}</h3>
+                  </div>
+                  <span className="text-xs text-slate-500">
+                    {new Date(item.created_at).toLocaleDateString('zh-TW')}
+                  </span>
+                </div>
+
+                <p className="mt-2 text-sm leading-6 text-slate-300">{item.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -58,7 +127,7 @@ export default function HomePage() {
       </div>
 
       <div>
-        <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+        <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-white">
           <TrendingUp size={18} className="text-indigo-400" /> 常用功能
         </h2>
 
@@ -85,7 +154,7 @@ export default function HomePage() {
 
       {data.recentCards.length > 0 ? (
         <div>
-          <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-white">
             <Sparkles size={18} className="text-amber-400" /> 最近獲得
           </h2>
 
