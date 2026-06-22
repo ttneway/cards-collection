@@ -26,7 +26,22 @@ export interface Profile {
   stars: number
   avatar_url: string | null
   scan_code: string | null
+  hide_high_rarity_announcements: boolean
   created_at: string
+}
+
+export interface DrawAnnouncement {
+  id: string
+  user_id: string
+  card_id: string
+  display_name: string
+  is_name_hidden: boolean
+  rarity: 'SSR' | 'UR'
+  card_name: string
+  card_series: string
+  card_color: string
+  created_at: string
+  expires_at: string
 }
 
 export interface Class {

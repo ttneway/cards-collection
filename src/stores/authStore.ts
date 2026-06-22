@@ -180,6 +180,7 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     class_id: null,
     student_id: null,
     avatar_url: null,
+    hide_high_rarity_announcements: false,
     created_at: new Date().toISOString()
   }
 

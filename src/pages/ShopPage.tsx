@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ShoppingBag, Sparkles, Star, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useAuthStore } from '../stores/authStore'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
+import { useAuthStore } from '../stores/authStore'
 import type { Card, CardPack, PackRarityOdds } from '../types'
 
 type DrawStage = 'idle' | 'opening' | 'revealed'

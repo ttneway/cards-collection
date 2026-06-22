@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Camera, Gift, Sparkles, TrendingUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
-import { Camera, Gift, TrendingUp, Sparkles } from 'lucide-react'
 
 interface HomeData {
   cardCount: number
   achievementCount: number
-  recentCards: any[]
+  recentCards: Array<{
+    id: string
+    name: string
+    color: string | null
+  }>
 }
 
 export default function HomePage() {
@@ -16,67 +20,80 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!user) return
+
     Promise.all([
       supabase.from('user_cards').select('count', { count: 'exact' }).eq('user_id', user.id),
       supabase.from('user_achievements').select('count', { count: 'exact' }).eq('user_id', user.id),
-      supabase.from('user_cards').select('card:card_id(*)').eq('user_id', user.id).order('acquired_at', { ascending: false }).limit(4)
+      supabase
+        .from('user_cards')
+        .select('card:card_id(id, name, color)')
+        .eq('user_id', user.id)
+        .order('acquired_at', { ascending: false })
+        .limit(4)
     ]).then(([cards, achievements, recent]) => {
       setData({
         cardCount: cards.count ?? 0,
         achievementCount: achievements.count ?? 0,
-        recentCards: (recent.data ?? []).map((r: any) => r.card).filter(Boolean)
+        recentCards: (recent.data ?? []).map((row: any) => row.card).filter(Boolean)
       })
     })
   }, [user])
 
   return (
     <div className="space-y-6">
-      <div className="text-center py-6">
-        <h1 className="text-2xl font-bold">
-          歡迎回來，{user?.name}
-        </h1>
-        <p className="text-slate-400 mt-1">今天也要繼續收集卡牌！</p>
+      <div className="py-6 text-center">
+        <h1 className="text-2xl font-bold text-white">歡迎回來，{user?.name}</h1>
+        <p className="mt-1 text-slate-400">今天也來累積點數、完成任務、收集新卡片。</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-slate-800 rounded-xl p-4 text-center">
+        <div className="rounded-2xl bg-slate-800 p-4 text-center">
           <p className="text-3xl font-bold text-indigo-400">{data.cardCount}</p>
-          <p className="text-slate-400 text-sm">已收集卡牌</p>
+          <p className="mt-1 text-sm text-slate-400">已收集卡片</p>
         </div>
-        <div className="bg-slate-800 rounded-xl p-4 text-center">
+        <div className="rounded-2xl bg-slate-800 p-4 text-center">
           <p className="text-3xl font-bold text-amber-400">{data.achievementCount}</p>
-          <p className="text-slate-400 text-sm">已解鎖成就</p>
+          <p className="mt-1 text-sm text-slate-400">已解鎖成就</p>
         </div>
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-          <TrendingUp size={18} className="text-indigo-400" /> 快速功能
+        <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+          <TrendingUp size={18} className="text-indigo-400" /> 常用功能
         </h2>
+
         <div className="grid grid-cols-2 gap-3">
-          <Link to={user?.role === 'student' ? '/profile' : '/scan'} className="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 text-center no-underline text-white transition-colors">
+          <Link
+            to={user?.role === 'student' ? '/profile' : '/scan'}
+            className="rounded-2xl bg-slate-800 p-4 text-center text-white no-underline transition-colors hover:bg-slate-700"
+          >
             <Camera size={28} className="mx-auto mb-2 text-indigo-400" />
-            <p className="font-medium">{user?.role === 'student' ? '我的身分碼' : '發點工作站'}</p>
-            <p className="text-xs text-slate-400">{user?.role === 'student' ? '出示條碼領點' : '掃任務與學生碼'}</p>
+            <p className="font-medium">{user?.role === 'student' ? '查看身分條碼' : '掃碼工作站'}</p>
+            <p className="mt-1 text-xs text-slate-400">{user?.role === 'student' ? '快速出示個人條碼' : '掃任務碼與學生條碼發點'}</p>
           </Link>
-          <Link to="/cards/packs" className="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 text-center no-underline text-white transition-colors">
+
+          <Link
+            to="/cards/packs"
+            className="rounded-2xl bg-slate-800 p-4 text-center text-white no-underline transition-colors hover:bg-slate-700"
+          >
             <Gift size={28} className="mx-auto mb-2 text-amber-400" />
-            <p className="font-medium">抽卡包</p>
-            <p className="text-xs text-slate-400">花費星星抽卡</p>
+            <p className="font-medium">抽卡商店</p>
+            <p className="mt-1 text-xs text-slate-400">使用星星抽卡，擴充你的收藏</p>
           </Link>
         </div>
       </div>
 
-      {data.recentCards.length > 0 && (
+      {data.recentCards.length > 0 ? (
         <div>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
             <Sparkles size={18} className="text-amber-400" /> 最近獲得
           </h2>
+
           <div className="flex gap-3 overflow-x-auto pb-2">
-            {data.recentCards.map((card: any) => (
+            {data.recentCards.map(card => (
               <div
                 key={card.id}
-                className="flex-shrink-0 w-24 h-32 rounded-xl flex items-center justify-center text-white text-xs font-bold text-center p-2"
+                className="flex h-32 w-24 flex-shrink-0 items-center justify-center rounded-2xl p-2 text-center text-xs font-bold text-white"
                 style={{ backgroundColor: card.color || '#334155' }}
               >
                 {card.name}
@@ -84,7 +101,7 @@ export default function HomePage() {
             ))}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   ArrowLeftRight,
@@ -5,6 +6,7 @@ import {
   CreditCard,
   LayoutDashboard,
   Library,
+  ListChecks,
   LogOut,
   Settings,
   ShieldCheck,
@@ -13,11 +15,12 @@ import {
   Star,
   Trophy,
   UserCircle,
-  Users,
-  ListChecks
+  Users
 } from 'lucide-react'
+import { ROLE_LABELS, formatRarityLabel } from '../lib/constants'
+import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
-import { ROLE_LABELS } from '../lib/constants'
+import type { DrawAnnouncement } from '../types'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '首頁', roles: ['student', 'leader', 'teacher', 'admin'] },
@@ -38,7 +41,37 @@ const navItems = [
 export default function Layout() {
   const { user, signOut, hasRole } = useAuthStore()
   const navigate = useNavigate()
+  const [announcements, setAnnouncements] = useState<DrawAnnouncement[]>([])
   const visibleNavItems = navItems.filter(item => hasRole(...(item.roles as any)))
+
+  const marqueeItems = useMemo(() => {
+    if (announcements.length === 0) return []
+    return [...announcements, ...announcements]
+  }, [announcements])
+
+  useEffect(() => {
+    if (!user) return
+
+    const loadAnnouncements = async () => {
+      const { data, error } = await supabase.rpc('get_active_draw_announcements')
+      if (!error && data) {
+        setAnnouncements(data as DrawAnnouncement[])
+      }
+    }
+
+    void loadAnnouncements()
+
+    const channel = supabase
+      .channel('draw-announcements-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'draw_announcements' }, () => {
+        void loadAnnouncements()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user?.id])
 
   const handleSignOut = async () => {
     await signOut()
@@ -47,33 +80,57 @@ export default function Layout() {
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-50 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-4 py-3">
-        <NavLink to="/" className="flex items-center gap-2 text-lg font-bold text-indigo-400 no-underline">
-          <Sparkles size={24} />
-          <span>校園集卡牌</span>
-        </NavLink>
+      <header className="sticky top-0 z-50 border-b border-slate-800 bg-slate-900">
+        <div className="flex items-center justify-between px-4 py-3">
+          <NavLink to="/" className="flex items-center gap-2 text-lg font-bold text-indigo-400 no-underline">
+            <Sparkles size={24} />
+            <span>校園集卡牌</span>
+          </NavLink>
 
-        <div className="flex items-center gap-3">
-          {user && (
-            <>
-              <span className="flex items-center gap-1 text-sm font-medium text-amber-400">
-                <Star size={16} fill="currentColor" /> {user.stars}
-              </span>
-              <span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-400">
-                {ROLE_LABELS[user.role]}
-              </span>
-              <NavLink to="/profile" className="text-slate-400 hover:text-white">
-                <UserCircle size={22} />
-              </NavLink>
-              <button type="button" onClick={handleSignOut} className="cursor-pointer text-slate-400 hover:text-red-400">
-                <LogOut size={18} />
-              </button>
-            </>
-          )}
+          <div className="flex items-center gap-3">
+            {user ? (
+              <>
+                <span className="flex items-center gap-1 text-sm font-medium text-amber-400">
+                  <Star size={16} fill="currentColor" /> {user.stars}
+                </span>
+                <span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-400">
+                  {ROLE_LABELS[user.role]}
+                </span>
+                <NavLink to="/profile" className="text-slate-400 hover:text-white">
+                  <UserCircle size={22} />
+                </NavLink>
+                <button type="button" onClick={handleSignOut} className="cursor-pointer text-slate-400 hover:text-red-400">
+                  <LogOut size={18} />
+                </button>
+              </>
+            ) : null}
+          </div>
         </div>
+
+        {announcements.length > 0 ? (
+          <div className="overflow-hidden border-t border-amber-500/20 bg-amber-500/10">
+            <div className="flex min-w-max items-center gap-4 py-2 text-sm" style={{ animation: 'marquee-scroll 28s linear infinite' }}>
+              {marqueeItems.map((announcement, index) => (
+                <div
+                  key={`${announcement.id}-${index}`}
+                  className="flex items-center gap-2 rounded-full border border-white/5 bg-slate-900/60 px-3 py-1.5 text-slate-100"
+                >
+                  <Sparkles size={14} className="text-amber-300" />
+                  <span className="whitespace-nowrap">
+                    {announcement.display_name} 抽中了{' '}
+                    <span className="font-semibold" style={{ color: announcement.card_color }}>
+                      {announcement.card_name}
+                    </span>
+                    {' '}· {formatRarityLabel(announcement.rarity)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </header>
 
-      <aside className="fixed bottom-0 left-0 top-[57px] z-40 hidden w-56 border-r border-slate-800 bg-slate-900 lg:block">
+      <aside className="fixed bottom-0 left-0 top-[98px] z-40 hidden w-56 border-r border-slate-800 bg-slate-900 lg:block">
         <nav className="space-y-1 p-3">
           {visibleNavItems.map(item => (
             <NavLink
