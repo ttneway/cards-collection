@@ -152,6 +152,7 @@ export interface Task {
   claim_cooldown_minutes: number
   allow_scanner: boolean
   allow_button_claim: boolean
+  scan_station_enabled: boolean
   scan_window_enabled: boolean
   window_start_time: string | null
   window_end_time: string | null

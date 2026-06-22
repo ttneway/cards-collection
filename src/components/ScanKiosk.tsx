@@ -11,7 +11,7 @@ type ScanKioskProps = {
 
 type ActiveTask = Pick<
   Task,
-  'id' | 'title' | 'description' | 'points' | 'task_code' | 'recurrence_type' | 'scan_window_enabled' | 'window_start_time' | 'window_end_time'
+  'id' | 'title' | 'description' | 'points' | 'task_code' | 'recurrence_type' | 'scan_station_enabled' | 'scan_window_enabled' | 'window_start_time' | 'window_end_time'
 >
 
 type ClaimLog = {
@@ -33,7 +33,6 @@ type PublicClaimResult = {
   message: string
 }
 
-const ACTIVE_TASKS_STORAGE_KEY = 'scan-kiosk-active-task-codes'
 const SCAN_RESET_MS = 120
 
 function normalizeScannedCode(value: string) {
@@ -58,41 +57,35 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
   const hiddenInputRef = useRef<HTMLInputElement>(null)
   const bufferRef = useRef('')
   const lastKeyAtRef = useRef(0)
-  const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([])
+  const [autoActiveTasks, setAutoActiveTasks] = useState<ActiveTask[]>([])
+  const [manualTasks, setManualTasks] = useState<ActiveTask[]>([])
   const [lastScannedCode, setLastScannedCode] = useState('')
   const [message, setMessage] = useState<string | null>('待命中，直接掃任務條碼即可開啟或關閉任務。')
   const [error, setError] = useState<string | null>(null)
   const [logs, setLogs] = useState<ClaimLog[]>([])
   const [busy, setBusy] = useState(false)
 
-  const activeTaskCodes = useMemo(
-    () => activeTasks.map(task => task.task_code).filter((taskCode): taskCode is string => Boolean(taskCode)),
-    [activeTasks]
-  )
+  const activeTasks = useMemo(() => {
+    const mapped = new Map<string, ActiveTask>()
+    for (const task of [...autoActiveTasks, ...manualTasks]) {
+      if (task.task_code) mapped.set(task.task_code, task)
+    }
+    return [...mapped.values()]
+  }, [autoActiveTasks, manualTasks])
 
   useEffect(() => {
     hiddenInputRef.current?.focus()
   }, [])
 
   useEffect(() => {
-    if (publicMode) {
-      const stored = window.localStorage.getItem(ACTIVE_TASKS_STORAGE_KEY)
-      if (!stored) return
+    void loadAutoActiveTasks()
+  }, [])
 
-      const codes = JSON.parse(stored) as string[]
-      if (!Array.isArray(codes) || codes.length === 0) return
-
-      void restoreActiveTasks(codes)
+  useEffect(() => {
+    const refocus = () => {
+      hiddenInputRef.current?.focus()
+      void loadAutoActiveTasks()
     }
-  }, [publicMode])
-
-  useEffect(() => {
-    if (!publicMode) return
-    window.localStorage.setItem(ACTIVE_TASKS_STORAGE_KEY, JSON.stringify(activeTaskCodes))
-  }, [activeTaskCodes, publicMode])
-
-  useEffect(() => {
-    const refocus = () => hiddenInputRef.current?.focus()
     window.addEventListener('click', refocus)
     window.addEventListener('focus', refocus)
     return () => {
@@ -134,24 +127,42 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [busy, activeTasks, publicMode, user?.id])
 
-  const restoreActiveTasks = async (codes: string[]) => {
-    const restored = await Promise.all(
-      codes.map(async code => {
-        try {
-          return await fetchTaskByCode(code)
-        } catch {
-          return null
-        }
-      })
-    )
-    setActiveTasks(restored.filter((task): task is ActiveTask => Boolean(task)))
+  const loadAutoActiveTasks = async () => {
+    const { data, error } = await supabase
+      .from('tasks')
+      .select(
+        'id, title, description, points, task_code, recurrence_type, scan_station_enabled, scan_window_enabled, window_start_time, window_end_time, allow_scanner, is_active'
+      )
+      .eq('is_active', true)
+      .eq('allow_scanner', true)
+      .eq('scan_station_enabled', true)
+      .order('created_at', { ascending: false })
+
+    if (error) return
+
+    const rows = ((data ?? []) as (Task & { allow_scanner: boolean })[])
+      .filter(task => task.task_code)
+      .map(task => ({
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        points: task.points,
+        task_code: task.task_code,
+        recurrence_type: task.recurrence_type,
+        scan_station_enabled: task.scan_station_enabled,
+        scan_window_enabled: task.scan_window_enabled,
+        window_start_time: task.window_start_time,
+        window_end_time: task.window_end_time
+      } satisfies ActiveTask))
+
+    setAutoActiveTasks(rows)
   }
 
   const fetchTaskByCode = async (taskCode: string) => {
     const { data, error } = await supabase
       .from('tasks')
       .select(
-        'id, title, description, points, task_code, recurrence_type, scan_window_enabled, window_start_time, window_end_time, allow_scanner, is_active'
+        'id, title, description, points, task_code, recurrence_type, scan_station_enabled, scan_window_enabled, window_start_time, window_end_time, allow_scanner, is_active'
       )
       .eq('task_code', taskCode)
       .eq('is_active', true)
@@ -169,6 +180,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
       points: task.points,
       task_code: task.task_code,
       recurrence_type: task.recurrence_type,
+      scan_station_enabled: task.scan_station_enabled,
       scan_window_enabled: task.scan_window_enabled,
       window_start_time: task.window_start_time,
       window_end_time: task.window_end_time
@@ -176,16 +188,24 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
   }
 
   const toggleTask = async (taskCode: string) => {
-    const existing = activeTasks.find(task => task.task_code === taskCode)
+    const task = await fetchTaskByCode(taskCode)
+
+    if (task.scan_station_enabled) {
+      await loadAutoActiveTasks()
+      setMessage(`任務「${task.title}」已設定為掃描發點自動開啟，工作站會直接把它當成進行中任務。`)
+      setError(null)
+      return
+    }
+
+    const existing = manualTasks.find(item => item.task_code === taskCode)
     if (existing) {
-      setActiveTasks(previous => previous.filter(task => task.task_code !== taskCode))
+      setManualTasks(previous => previous.filter(item => item.task_code !== taskCode))
       setMessage(`已關閉任務：${existing.title}`)
       setError(null)
       return
     }
 
-    const task = await fetchTaskByCode(taskCode)
-    setActiveTasks(previous => [task, ...previous.filter(item => item.task_code !== task.task_code)])
+    setManualTasks(previous => [task, ...previous.filter(item => item.task_code !== task.task_code)])
     setMessage(`已開啟任務：${task.title}`)
     setError(null)
   }
@@ -210,7 +230,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
   const claimAcrossActiveTasks = async (studentCode: string) => {
     if (activeTasks.length === 0) {
-      throw new Error('目前沒有進行中的任務，請先掃任務條碼。')
+      throw new Error(`目前沒有進行中的任務。你剛掃到的是學生身分條碼 ${studentCode}，請先掃任務條碼（TSK 開頭）把任務加入工作站。`)
     }
 
     const settled = await Promise.allSettled(activeTasks.map(task => claimTask(task, studentCode)))
@@ -285,8 +305,8 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
   }
 
   const clearActiveTasks = () => {
-    setActiveTasks([])
-    setMessage('已清空目前進行中的任務。')
+    setManualTasks([])
+    setMessage('已清空手動加入的任務；自動開啟的任務仍會保留。')
     setError(null)
   }
 
@@ -405,8 +425,8 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
             </div>
 
             <div className="rounded-xl bg-slate-900/50 px-4 py-3 text-sm text-slate-400">
-              <p>1. 掃任務條碼：加入或關閉工作站中的任務。</p>
-              <p className="mt-2">2. 掃學生身分條碼：對所有符合規則的進行中任務一次發點。</p>
+              <p>1. 先掃任務條碼：任務條碼會是 `TSK` 開頭，掃一次加入工作站，再掃一次關閉。</p>
+              <p className="mt-2">2. 再掃學生身分條碼：學生碼通常是 `USR` 或 `STU` 開頭，會對所有符合規則的進行中任務一次發點。</p>
             </div>
           </section>
         </div>

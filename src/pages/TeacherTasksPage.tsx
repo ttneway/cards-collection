@@ -52,6 +52,7 @@ type TaskForm = {
   custom_reset_days: number
   allow_scanner: boolean
   allow_button_claim: boolean
+  scan_station_enabled: boolean
   scan_window_enabled: boolean
   window_start_time: string
   window_end_time: string
@@ -68,6 +69,7 @@ const emptyForm: TaskForm = {
   custom_reset_days: 7,
   allow_scanner: true,
   allow_button_claim: false,
+  scan_station_enabled: true,
   scan_window_enabled: false,
   window_start_time: '07:00',
   window_end_time: '08:00',
@@ -85,6 +87,7 @@ function mapTaskToForm(task: Task): TaskForm {
     custom_reset_days: task.custom_reset_days ?? 7,
     allow_scanner: task.allow_scanner,
     allow_button_claim: task.allow_button_claim,
+    scan_station_enabled: task.scan_station_enabled,
     scan_window_enabled: task.scan_window_enabled,
     window_start_time: task.window_start_time?.slice(0, 5) ?? '07:00',
     window_end_time: task.window_end_time?.slice(0, 5) ?? '08:00',
@@ -220,6 +223,7 @@ export default function TeacherTasksPage() {
     claim_cooldown_minutes: Number(form.claim_cooldown_minutes),
     allow_scanner: form.allow_scanner,
     allow_button_claim: form.allow_button_claim,
+    scan_station_enabled: form.allow_scanner ? form.scan_station_enabled : false,
     code_format: 'both',
     is_active: form.is_active,
     scan_window_enabled: form.scan_window_enabled,
@@ -470,6 +474,16 @@ export default function TeacherTasksPage() {
                   className="accent-indigo-500"
                 />
                 登入後按鈕完成
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={form.scan_station_enabled}
+                  disabled={!form.allow_scanner}
+                  onChange={event => setForm({ ...form, scan_station_enabled: event.target.checked })}
+                  className="accent-indigo-500"
+                />
+                ?????????
               </label>
             </div>
           </div>
