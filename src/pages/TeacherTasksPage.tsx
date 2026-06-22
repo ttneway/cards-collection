@@ -6,7 +6,6 @@ import {
   Plus,
   Power,
   PowerOff,
-  Printer,
   RefreshCw,
   Save,
   ScanLine,
@@ -558,7 +557,16 @@ export default function TeacherTasksPage() {
               </span>
             </div>
 
-            <BarcodeLabel value={task.task_code} label="任務條碼" />
+            <BarcodeLabel
+              value={task.task_code}
+              label="任務條碼"
+              filename={`${task.title}-barcode.png`}
+              metaLines={[
+                `任務：${task.title}`,
+                `點數：${task.points}`,
+                `週期：${RECURRENCE_LABELS[task.recurrence_type]}`
+              ]}
+            />
 
             <div className="flex flex-wrap gap-2">
               <button
@@ -588,14 +596,6 @@ export default function TeacherTasksPage() {
                 className="flex cursor-pointer items-center gap-2 rounded-lg border-none bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
               >
                 <Trash2 size={16} /> 刪除
-              </button>
-
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="flex cursor-pointer items-center gap-2 rounded-lg border-none bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
-              >
-                <Printer size={16} /> 列印
               </button>
 
               <button
