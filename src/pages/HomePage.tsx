@@ -12,6 +12,7 @@ interface HomeData {
     id: string
     name: string
     color: string | null
+    count: number
   }>
 }
 
@@ -25,20 +26,27 @@ export default function HomePage() {
 
     const loadHomeData = async () => {
       const [cards, achievements, recent] = await Promise.all([
-        supabase.from('user_cards').select('count', { count: 'exact' }).eq('user_id', user.id),
+        supabase.from('user_cards').select('count').eq('user_id', user.id),
         supabase.from('user_achievements').select('count', { count: 'exact' }).eq('user_id', user.id),
         supabase
           .from('user_cards')
-          .select('card:card_id(id, name, color)')
+          .select('count, card:card_id(id, name, color)')
           .eq('user_id', user.id)
           .order('acquired_at', { ascending: false })
           .limit(4)
       ])
 
+      const totalCards = (cards.data ?? []).reduce((sum, row: any) => sum + (row.count ?? 0), 0)
+
       setData({
-        cardCount: cards.count ?? 0,
+        cardCount: totalCards,
         achievementCount: achievements.count ?? 0,
-        recentCards: (recent.data ?? []).map((row: any) => row.card).filter(Boolean)
+        recentCards: (recent.data ?? [])
+          .map((row: any) => ({
+            ...row.card,
+            count: row.count ?? 0
+          }))
+          .filter((row: any) => row.id)
       })
     }
 
@@ -103,9 +111,7 @@ export default function HomePage() {
                     </div>
                     <h3 className="mt-2 font-semibold text-white">{item.title}</h3>
                   </div>
-                  <span className="text-xs text-slate-500">
-                    {new Date(item.created_at).toLocaleDateString('zh-TW')}
-                  </span>
+                  <span className="text-xs text-slate-500">{new Date(item.created_at).toLocaleDateString('zh-TW')}</span>
                 </div>
 
                 <p className="mt-2 text-sm leading-6 text-slate-300">{item.body}</p>
@@ -118,7 +124,7 @@ export default function HomePage() {
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl bg-slate-800 p-4 text-center">
           <p className="text-3xl font-bold text-indigo-400">{data.cardCount}</p>
-          <p className="mt-1 text-sm text-slate-400">已收集卡片</p>
+          <p className="mt-1 text-sm text-slate-400">持有卡片總數</p>
         </div>
         <div className="rounded-2xl bg-slate-800 p-4 text-center">
           <p className="text-3xl font-bold text-amber-400">{data.achievementCount}</p>
@@ -162,9 +168,12 @@ export default function HomePage() {
             {data.recentCards.map(card => (
               <div
                 key={card.id}
-                className="flex h-32 w-24 flex-shrink-0 items-center justify-center rounded-2xl p-2 text-center text-xs font-bold text-white"
+                className="relative flex h-32 w-24 flex-shrink-0 items-center justify-center rounded-2xl p-2 text-center text-xs font-bold text-white"
                 style={{ backgroundColor: card.color || '#334155' }}
               >
+                <div className="absolute right-2 top-2 rounded-full bg-slate-950/70 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  x{card.count}
+                </div>
                 {card.name}
               </div>
             ))}

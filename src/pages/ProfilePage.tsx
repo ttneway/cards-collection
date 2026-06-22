@@ -25,7 +25,7 @@ export default function ProfilePage() {
     if (!user) return
 
     Promise.all([
-      supabase.from('user_cards').select('count', { count: 'exact' }).eq('user_id', user.id),
+      supabase.from('user_cards').select('count').eq('user_id', user.id),
       supabase.from('user_achievements').select('count', { count: 'exact' }).eq('user_id', user.id),
       supabase.from('task_completions').select('count', { count: 'exact' }).eq('user_id', user.id),
       supabase
@@ -35,8 +35,10 @@ export default function ProfilePage() {
         .order('created_at', { ascending: false })
         .limit(10)
     ]).then(([cards, achievements, tasks, tx]) => {
+      const totalCards = (cards.data ?? []).reduce((sum, row: any) => sum + (row.count ?? 0), 0)
+
       setStats({
-        cards: cards.count ?? 0,
+        cards: totalCards,
         achievements: achievements.count ?? 0,
         tasks: tasks.count ?? 0
       })
