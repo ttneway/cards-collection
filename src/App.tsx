@@ -87,6 +87,7 @@ export default function App() {
     <Routes>
       <Route path="/auth" element={<LoginPage />} />
       <Route path="/claim" element={<ScanPage />} />
+      <Route path="/kiosk" element={<ScanPage />} />
       <Route path="/scan/camera" element={<ScanPage />} />
 
       <Route
