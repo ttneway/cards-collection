@@ -224,7 +224,7 @@ export default function TeacherTasksPage() {
     allow_scanner: form.allow_scanner,
     allow_button_claim: form.allow_button_claim,
     scan_station_enabled: form.allow_scanner ? form.scan_station_enabled : false,
-    code_format: 'both',
+    code_format: 'qr',
     is_active: form.is_active,
     scan_window_enabled: form.scan_window_enabled,
     window_timezone: 'Asia/Taipei',

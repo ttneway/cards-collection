@@ -1,5 +1,5 @@
 import { Download, Printer } from 'lucide-react'
-import { createQrImageUrl, downloadBarcodePng, printBarcodeSheet, renderCode128Svg } from '../utils/codes'
+import { createQrImageUrl, downloadBarcodePng, printBarcodeSheet } from '../utils/codes'
 
 type BarcodeLabelProps = {
   value: string | null | undefined
@@ -18,7 +18,7 @@ export default function BarcodeLabel({ value, label, metaLines = [], filename }:
   }
 
   const handleDownload = () => {
-    downloadBarcodePng(
+    void downloadBarcodePng(
       {
         title: label,
         value,
@@ -72,14 +72,8 @@ export default function BarcodeLabel({ value, label, metaLines = [], filename }:
         </div>
       ) : null}
 
-      <div className="grid items-center gap-4 sm:grid-cols-[180px_1fr]">
-        <div className="flex justify-center rounded-xl bg-white p-3">
-          <img src={createQrImageUrl(value, 220)} alt={value} className="h-36 w-36 object-contain" />
-        </div>
-        <div
-          className="overflow-hidden rounded-xl bg-white p-2"
-          dangerouslySetInnerHTML={{ __html: renderCode128Svg(value, { height: 72, showText: true, className: 'w-full h-24' }) }}
-        />
+      <div className="flex justify-center rounded-xl bg-white p-4">
+        <img src={createQrImageUrl(value, 320)} alt={value} className="h-72 w-72 max-w-full object-contain" />
       </div>
     </div>
   )

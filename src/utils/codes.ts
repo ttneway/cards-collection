@@ -1,17 +1,3 @@
-const CODE128_PATTERNS = [
-  '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
-  '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
-  '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
-  '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
-  '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
-  '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
-  '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
-  '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
-  '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
-  '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
-  '114131', '311141', '411131', '211412', '211214', '211232', '2331112'
-]
-
 type BarcodePrintItem = {
   title: string
   value: string
@@ -24,6 +10,29 @@ function normalizePrefix(prefix: string) {
   return value.replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'SCN'
 }
 
+function sanitizeFilename(value: string) {
+  return value.replace(/[<>:"/\\|?*]+/g, '-').trim() || 'qr-code'
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.crossOrigin = 'anonymous'
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('QR code image could not be loaded.'))
+    image.src = src
+  })
+}
+
 export function createScanCode(prefix: string): string {
   const bytes = new Uint8Array(5)
   crypto.getRandomValues(bytes)
@@ -32,7 +41,7 @@ export function createScanCode(prefix: string): string {
 }
 
 export function createQrImageUrl(value: string, size = 240) {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=8&data=${encodeURIComponent(value)}`
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=12&data=${encodeURIComponent(value)}`
 }
 
 export function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
@@ -49,88 +58,36 @@ export function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
   URL.revokeObjectURL(url)
 }
 
-function code128Values(value: string) {
-  const values = [104]
-  for (const char of value) {
-    const code = char.charCodeAt(0)
-    values.push(Math.min(Math.max(code - 32, 0), 95))
-  }
-  const checksum = values.reduce((sum, current, index) => sum + current * (index === 0 ? 1 : index), 0) % 103
-  return [...values, checksum, 106]
-}
-
-function getCode128Bars(value: string) {
-  let x = 0
-  const bars: { x: number; width: number }[] = []
-
-  for (const code of code128Values(value)) {
-    const pattern = CODE128_PATTERNS[code]
-    for (let i = 0; i < pattern.length; i += 1) {
-      const width = Number(pattern[i])
-      if (i % 2 === 0) bars.push({ x, width })
-      x += width
-    }
-  }
-
-  return { width: x, bars }
-}
-
-export function renderCode128Svg(value: string, options?: { height?: number; showText?: boolean; className?: string }) {
-  const { width, bars } = getCode128Bars(value)
-  const height = options?.height ?? 64
-  const showText = options?.showText ?? true
-  const className = options?.className ?? 'w-full h-24 bg-white rounded-xl'
-  const textY = height - 5
-  const barHeight = showText ? height - 20 : height - 8
-
-  const rects = bars
-    .map(bar => `<rect x="${bar.x}" y="4" width="${bar.width}" height="${barHeight}" fill="#020617" />`)
-    .join('')
-
-  const text = showText
-    ? `<text x="${width / 2}" y="${textY}" text-anchor="middle" font-size="8" fill="#020617" font-family="monospace">${value}</text>`
-    : ''
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" class="${className}" role="img" aria-label="${value}">${rects}${text}</svg>`
-}
-
-function sanitizeFilename(value: string) {
-  return value.replace(/[<>:"/\\|?*]+/g, '-').trim() || 'barcode'
-}
-
-export function downloadBarcodePng(item: BarcodePrintItem, filename?: string) {
+export async function downloadBarcodePng(item: BarcodePrintItem, filename?: string) {
   const canvas = document.createElement('canvas')
   canvas.width = 1200
-  canvas.height = 520
+  canvas.height = 900
   const context = canvas.getContext('2d')
   if (!context) return
+
+  const qrImage = await loadImage(createQrImageUrl(item.value, 700))
 
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, canvas.width, canvas.height)
 
   context.fillStyle = '#0f172a'
-  context.font = 'bold 40px sans-serif'
-  context.fillText(item.title, 60, 70)
+  context.textAlign = 'left'
+  context.font = 'bold 44px sans-serif'
+  context.fillText(item.title, 60, 80)
 
-  context.font = '24px sans-serif'
+  context.font = '26px sans-serif'
   ;(item.metaLines ?? []).forEach((line, index) => {
-    context.fillText(line, 60, 120 + index * 34)
+    context.fillText(line, 60, 135 + index * 34)
   })
 
-  const { width, bars } = getCode128Bars(item.value)
-  const marginX = 60
-  const top = 220
-  const targetWidth = canvas.width - marginX * 2
-  const scale = targetWidth / width
-
-  context.fillStyle = '#020617'
-  bars.forEach(bar => {
-    context.fillRect(marginX + bar.x * scale, top, Math.max(bar.width * scale, 2), 170)
-  })
+  const qrSize = 620
+  const qrX = Math.round((canvas.width - qrSize) / 2)
+  const qrY = 220
+  context.drawImage(qrImage, qrX, qrY, qrSize, qrSize)
 
   context.font = '28px monospace'
   context.textAlign = 'center'
-  context.fillText(item.value, canvas.width / 2, 440)
+  context.fillText(item.value, canvas.width / 2, 875)
 
   const link = document.createElement('a')
   link.href = canvas.toDataURL('image/png')
@@ -143,12 +100,16 @@ export function printBarcodeSheet(title: string, items: BarcodePrintItem[]) {
 
   const cardsHtml = items
     .map(item => {
-      const metaHtml = (item.metaLines ?? []).map(line => `<p>${line}</p>`).join('')
+      const metaHtml = (item.metaLines ?? []).map(line => `<p>${escapeHtml(line)}</p>`).join('')
+      const qrUrl = createQrImageUrl(item.value, 420)
       return `
         <article class="card">
-          <h2>${item.title}</h2>
+          <h2>${escapeHtml(item.title)}</h2>
           <div class="meta">${metaHtml}</div>
-          <div class="barcode">${renderCode128Svg(item.value, { height: 72, showText: true, className: 'barcode-svg' })}</div>
+          <div class="qr-wrap">
+            <img class="qr" src="${qrUrl}" alt="${escapeHtml(item.value)}" />
+          </div>
+          <p class="value">${escapeHtml(item.value)}</p>
         </article>
       `
     })
@@ -160,16 +121,17 @@ export function printBarcodeSheet(title: string, items: BarcodePrintItem[]) {
   printWindow.document.write(`
     <html>
       <head>
-        <title>${title}</title>
+        <title>${escapeHtml(title)}</title>
         <style>
           body { margin: 0; padding: 24px; font-family: Arial, sans-serif; color: #0f172a; background: #fff; }
           .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-          .card { border: 1px solid #cbd5e1; border-radius: 12px; padding: 16px; break-inside: avoid; }
-          .card h2 { margin: 0 0 10px; font-size: 20px; }
-          .meta { margin-bottom: 12px; font-size: 14px; line-height: 1.5; }
+          .card { border: 1px solid #cbd5e1; border-radius: 12px; padding: 16px; break-inside: avoid; text-align: center; }
+          .card h2 { margin: 0 0 10px; font-size: 20px; text-align: left; }
+          .meta { margin-bottom: 12px; font-size: 14px; line-height: 1.5; text-align: left; }
           .meta p { margin: 0; }
-          .barcode { background: #fff; }
-          .barcode-svg { width: 100%; height: auto; display: block; }
+          .qr-wrap { display: flex; justify-content: center; align-items: center; padding: 12px 0 8px; }
+          .qr { width: 240px; height: 240px; object-fit: contain; }
+          .value { margin: 8px 0 0; font-size: 13px; font-family: monospace; word-break: break-all; }
           @media print {
             body { padding: 12px; }
             .grid { gap: 12px; }
