@@ -35,6 +35,29 @@ type PublicClaimResult = {
 
 const SCAN_RESET_MS = 120
 
+function isTaskOpenNow(task: Pick<ActiveTask, 'scan_window_enabled' | 'window_start_time' | 'window_end_time'>) {
+  if (!task.scan_window_enabled || !task.window_start_time || !task.window_end_time) return true
+
+  const localTime = new Intl.DateTimeFormat('en-CA', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Taipei'
+  }).format(new Date())
+
+  const start = task.window_start_time.slice(0, 5)
+  const end = task.window_end_time.slice(0, 5)
+
+  if (start <= end) return localTime >= start && localTime <= end
+  return localTime >= start || localTime <= end
+}
+
+function classifyFailureMessage(message: string) {
+  if (message.includes('本週期已達領取上限')) return 'limit'
+  if (message.includes('目前不在可掃碼時間內')) return 'window'
+  return 'other'
+}
+
 function normalizeScannedCode(value: string) {
   return value.trim().replace(/\s+/g, '').toUpperCase()
 }
@@ -68,7 +91,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
   const activeTasks = useMemo(() => {
     const mapped = new Map<string, ActiveTask>()
     for (const task of [...autoActiveTasks, ...manualTasks]) {
-      if (task.task_code) mapped.set(task.task_code, task)
+      if (task.task_code && isTaskOpenNow(task)) mapped.set(task.task_code, task)
     }
     return [...mapped.values()]
   }, [autoActiveTasks, manualTasks])
@@ -190,9 +213,13 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
   const toggleTask = async (taskCode: string) => {
     const task = await fetchTaskByCode(taskCode)
 
+    if (!isTaskOpenNow(task)) {
+      throw new Error(`???${task.title}????????? ${task.window_start_time?.slice(0, 5)}-${task.window_end_time?.slice(0, 5)}?????????????`)
+    }
+
     if (task.scan_station_enabled) {
       await loadAutoActiveTasks()
-      setMessage(`任務「${task.title}」已設定為掃描發點自動開啟，工作站會直接把它當成進行中任務。`)
+      setMessage(`???${task.title}???????????????????????????`)
       setError(null)
       return
     }
@@ -200,13 +227,13 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
     const existing = manualTasks.find(item => item.task_code === taskCode)
     if (existing) {
       setManualTasks(previous => previous.filter(item => item.task_code !== taskCode))
-      setMessage(`已關閉任務：${existing.title}`)
+      setMessage(`??????${existing.title}`)
       setError(null)
       return
     }
 
     setManualTasks(previous => [task, ...previous.filter(item => item.task_code !== task.task_code)])
-    setMessage(`已開啟任務：${task.title}`)
+    setMessage(`??????${task.title}`)
     setError(null)
   }
 
@@ -230,7 +257,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
   const claimAcrossActiveTasks = async (studentCode: string) => {
     if (activeTasks.length === 0) {
-      throw new Error(`目前沒有進行中的任務。你剛掃到的是學生身分條碼 ${studentCode}，請先掃任務條碼（TSK 開頭）把任務加入工作站。`)
+      throw new Error(`??????????????????????? ${studentCode}?????????TSK ???????????????`)
     }
 
     const settled = await Promise.allSettled(activeTasks.map(task => claimTask(task, studentCode)))
@@ -243,11 +270,20 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
       .map(item => item.reason instanceof Error ? item.reason.message : String(item.reason))
 
     if (successes.length === 0) {
-      throw new Error(failures[0] ?? '這次掃描沒有成功領取任何積分。')
+      throw new Error(failures[0] ?? '???????????????')
     }
 
     const studentName = successes[0].student_name
     const totalPoints = successes.reduce((sum, item) => sum + item.points_awarded, 0)
+    const successLines = successes.map(item => `${item.task_title}?????${item.points_awarded}???`)
+    const limitCount = failures.filter(message => classifyFailureMessage(message) === 'limit').length
+    const windowCount = failures.filter(message => classifyFailureMessage(message) === 'window').length
+    const otherFailures = failures.filter(message => classifyFailureMessage(message) === 'other')
+    const errorParts: string[] = []
+
+    if (limitCount > 0) errorParts.push(`?${limitCount}?????????`)
+    if (windowCount > 0) errorParts.push(`?${windowCount}???????????`)
+    if (otherFailures.length > 0) errorParts.push(...otherFailures)
 
     setLogs(previous => [
       ...successes.map(item => ({
@@ -261,12 +297,8 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
       ...previous
     ].slice(0, 30))
 
-    setMessage(
-      failures.length === 0
-        ? `${studentName} 本次共領取 ${successes.length} 個任務，合計 ${totalPoints} 點。`
-        : `${studentName} 成功領取 ${successes.length} 個任務，合計 ${totalPoints} 點。另有 ${failures.length} 個任務未通過規則。`
-    )
-    setError(failures.length === 0 ? null : failures.join('；'))
+    setMessage(`${studentName}?????${successes.length}??????${totalPoints}????\n${successLines.join('\n')}`)
+    setError(errorParts.length === 0 ? null : errorParts.join('?'))
   }
 
   const processScannedCode = async (rawCode: string) => {
@@ -414,7 +446,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                 ? 'border-red-500/30 bg-red-500/10 text-red-300'
                 : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
             }`}>
-              {error ?? message}
+              <div className="whitespace-pre-line">{error ?? message}</div>
             </div>
 
             <div className="rounded-xl bg-slate-900/50 px-4 py-3">
