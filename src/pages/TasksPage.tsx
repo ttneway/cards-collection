@@ -121,7 +121,7 @@ export default function TasksPage() {
                       {task.claim_cooldown_minutes > 0 && <span>冷卻 {task.claim_cooldown_minutes} 分鐘</span>}
                       {task.scan_window_enabled && task.window_start_time && task.window_end_time && (
                         <span>
-                          限時 {task.window_start_time.slice(0, 5)}-{task.window_end_time.slice(0, 5)}
+                          開放 {task.window_start_time.slice(0, 5)}-{task.window_end_time.slice(0, 5)}
                         </span>
                       )}
                     </div>

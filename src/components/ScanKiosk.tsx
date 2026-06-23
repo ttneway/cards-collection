@@ -387,7 +387,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                       <span>{task.recurrence_type}</span>
                       {task.scan_window_enabled && task.window_start_time && task.window_end_time ? (
                         <span>
-                          限時 {task.window_start_time.slice(0, 5)}-{task.window_end_time.slice(0, 5)}
+                          開放 {task.window_start_time.slice(0, 5)}-{task.window_end_time.slice(0, 5)}
                         </span>
                       ) : null}
                       <span className="font-mono">{task.task_code}</span>

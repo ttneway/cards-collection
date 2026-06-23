@@ -483,7 +483,7 @@ export default function TeacherTasksPage() {
                   onChange={event => setForm({ ...form, scan_station_enabled: event.target.checked })}
                   className="accent-indigo-500"
                 />
-                ?????????
+                掃描發點中自動開啟
               </label>
             </div>
           </div>
@@ -495,7 +495,7 @@ export default function TeacherTasksPage() {
               onChange={event => setForm({ ...form, scan_window_enabled: event.target.checked })}
               className="accent-indigo-500"
             />
-            限定掃碼時間
+            任務開放時間
           </label>
 
           {form.scan_window_enabled && (
