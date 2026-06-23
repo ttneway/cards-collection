@@ -11,7 +11,16 @@ type ScanKioskProps = {
 
 type ActiveTask = Pick<
   Task,
-  'id' | 'title' | 'description' | 'points' | 'task_code' | 'recurrence_type' | 'scan_station_enabled' | 'scan_window_enabled' | 'window_start_time' | 'window_end_time'
+  | 'id'
+  | 'title'
+  | 'description'
+  | 'points'
+  | 'task_code'
+  | 'recurrence_type'
+  | 'scan_station_enabled'
+  | 'scan_window_enabled'
+  | 'window_start_time'
+  | 'window_end_time'
 >
 
 type ClaimLog = {
@@ -54,7 +63,7 @@ function isTaskOpenNow(task: Pick<ActiveTask, 'scan_window_enabled' | 'window_st
 
 function classifyFailureMessage(message: string) {
   if (message.includes('本週期已達領取上限')) return 'limit'
-  if (message.includes('目前不在可掃碼時間內')) return 'window'
+  if (message.includes('目前不在可掃碼時間內') || message.includes('目前不在任務開放時間內')) return 'window'
   return 'other'
 }
 
@@ -148,7 +157,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [busy, activeTasks, publicMode, user?.id])
+  }, [busy, publicMode, user?.id])
 
   const loadAutoActiveTasks = async () => {
     const { data, error } = await supabase
@@ -214,12 +223,14 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
     const task = await fetchTaskByCode(taskCode)
 
     if (!isTaskOpenNow(task)) {
-      throw new Error(`???${task.title}????????? ${task.window_start_time?.slice(0, 5)}-${task.window_end_time?.slice(0, 5)}?????????????`)
+      throw new Error(
+        `任務「${task.title}」目前不在開放時間 ${task.window_start_time?.slice(0, 5)}-${task.window_end_time?.slice(0, 5)}，暫時不會列入進行中任務。`
+      )
     }
 
     if (task.scan_station_enabled) {
       await loadAutoActiveTasks()
-      setMessage(`???${task.title}???????????????????????????`)
+      setMessage(`任務「${task.title}」已設定為自動開啟，工作站會直接把它當成進行中的任務。`)
       setError(null)
       return
     }
@@ -227,13 +238,13 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
     const existing = manualTasks.find(item => item.task_code === taskCode)
     if (existing) {
       setManualTasks(previous => previous.filter(item => item.task_code !== taskCode))
-      setMessage(`??????${existing.title}`)
+      setMessage(`已關閉任務：${existing.title}`)
       setError(null)
       return
     }
 
     setManualTasks(previous => [task, ...previous.filter(item => item.task_code !== task.task_code)])
-    setMessage(`??????${task.title}`)
+    setMessage(`已開啟任務：${task.title}`)
     setError(null)
   }
 
@@ -257,7 +268,9 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
   const claimAcrossActiveTasks = async (studentCode: string) => {
     if (activeTasks.length === 0) {
-      throw new Error(`??????????????????????? ${studentCode}?????????TSK ???????????????`)
+      throw new Error(
+        `目前沒有進行中的任務。你剛掃到的是學生身分條碼 ${studentCode}，請先掃任務條碼（TSK 開頭）或開啟自動進行中的任務。`
+      )
     }
 
     const settled = await Promise.allSettled(activeTasks.map(task => claimTask(task, studentCode)))
@@ -270,19 +283,19 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
       .map(item => item.reason instanceof Error ? item.reason.message : String(item.reason))
 
     if (successes.length === 0) {
-      throw new Error(failures[0] ?? '???????????????')
+      throw new Error(failures[0] ?? '這次掃描沒有成功領取任何積分。')
     }
 
     const studentName = successes[0].student_name
     const totalPoints = successes.reduce((sum, item) => sum + item.points_awarded, 0)
-    const successLines = successes.map(item => `${item.task_title}?????${item.points_awarded}???`)
-    const limitCount = failures.filter(message => classifyFailureMessage(message) === 'limit').length
-    const windowCount = failures.filter(message => classifyFailureMessage(message) === 'window').length
-    const otherFailures = failures.filter(message => classifyFailureMessage(message) === 'other')
+    const successLines = successes.map(item => `${item.task_title}任務，領取${item.points_awarded}點積分`)
+    const limitCount = failures.filter(item => classifyFailureMessage(item) === 'limit').length
+    const windowCount = failures.filter(item => classifyFailureMessage(item) === 'window').length
+    const otherFailures = failures.filter(item => classifyFailureMessage(item) === 'other')
     const errorParts: string[] = []
 
-    if (limitCount > 0) errorParts.push(`?${limitCount}?????????`)
-    if (windowCount > 0) errorParts.push(`?${windowCount}???????????`)
+    if (limitCount > 0) errorParts.push(`有${limitCount}項任務已達領取上限`)
+    if (windowCount > 0) errorParts.push(`有${windowCount}項任務目前不在開放時間`)
     if (otherFailures.length > 0) errorParts.push(...otherFailures)
 
     setLogs(previous => [
@@ -297,8 +310,8 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
       ...previous
     ].slice(0, 30))
 
-    setMessage(`${studentName}?????${successes.length}??????${totalPoints}????\n${successLines.join('\n')}`)
-    setError(errorParts.length === 0 ? null : errorParts.join('?'))
+    setMessage(`${studentName}本次共領取${successes.length}項任務，合計${totalPoints}點積分。\n${successLines.join('\n')}`)
+    setError(errorParts.length === 0 ? null : errorParts.join('；'))
   }
 
   const processScannedCode = async (rawCode: string) => {
@@ -311,7 +324,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
     try {
       if (isFunctionCode(code)) {
         if (publicMode) {
-          throw new Error('公開工作站不支援功能碼。')
+          throw new Error('公開掃描頁不提供功能碼操作。')
         }
 
         navigate('/teacher/tasks?mode=create')
@@ -324,12 +337,12 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
       }
 
       if (!isLikelyStudentCode(code)) {
-        throw new Error('無法辨識這個條碼格式。請掃任務條碼或學生身分條碼。')
+        throw new Error('這不是可辨識的學生身分條碼。請掃任務條碼、功能碼，或學生身分條碼。')
       }
 
       await claimAcrossActiveTasks(code)
     } catch (caught: any) {
-      setError(caught?.message || '掃描處理失敗。')
+      setError(caught?.message || '掃描處理失敗，請再試一次。')
     } finally {
       setBusy(false)
       window.setTimeout(() => hiddenInputRef.current?.focus(), 0)
@@ -338,7 +351,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
   const clearActiveTasks = () => {
     setManualTasks([])
-    setMessage('已清空手動加入的任務；自動開啟的任務仍會保留。')
+    setMessage('已清空手動加入的任務。系統仍會保留自動開啟中的任務。')
     setError(null)
   }
 
@@ -359,16 +372,16 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
               掃碼工作站
             </div>
             <h1 className="mt-2 text-2xl font-bold">
-              {publicMode ? '免登入掃碼發點頁' : '發點工作站'}
+              {publicMode ? '公開掃描領點頁面' : '掃碼發點工作站'}
             </h1>
             <p className="mt-1 text-sm text-slate-400">
-              直接掃任務條碼即可開關任務；掃學生身分條碼時，會對目前進行中的任務逐一核發積分。
+              這個頁面會持續待命，不需要點輸入框，掃描器送出 Enter 後就會自動處理。
             </p>
           </div>
 
           {publicMode ? (
             <Link to="/auth" className="text-sm text-slate-300 no-underline hover:text-white">
-              教師 / 幹部登入
+              返回登入 / 管理頁
             </Link>
           ) : null}
         </div>
@@ -382,7 +395,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                   目前進行中的任務
                 </h2>
                 <p className="mt-1 text-sm text-slate-400">
-                  掃同一個任務條碼第二次，就會把它從目前工作站關閉。
+                  只有目前真的開放、而且允許掃碼完成的任務，才會出現在這裡。
                 </p>
               </div>
 
@@ -393,14 +406,14 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                   className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
                 >
                   <RefreshCcw size={16} />
-                  清空任務
+                  清空手動任務
                 </button>
               ) : null}
             </div>
 
             {activeTasks.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 px-4 py-8 text-center text-sm text-slate-500">
-                還沒有進行中的任務，現在直接掃任務條碼即可開始。
+                目前沒有進行中的任務，請先掃任務條碼，或在任務設定中開啟自動發點。
               </div>
             ) : (
               <div className="space-y-3">
@@ -419,7 +432,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                       <span>{task.recurrence_type}</span>
                       {task.scan_window_enabled && task.window_start_time && task.window_end_time ? (
                         <span>
-                          開放 {task.window_start_time.slice(0, 5)}-{task.window_end_time.slice(0, 5)}
+                          開放時間 {task.window_start_time.slice(0, 5)}-{task.window_end_time.slice(0, 5)}
                         </span>
                       ) : null}
                       <span className="font-mono">{task.task_code}</span>
@@ -441,11 +454,13 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
               </p>
             </div>
 
-            <div className={`rounded-xl border px-4 py-3 text-sm ${
-              error
-                ? 'border-red-500/30 bg-red-500/10 text-red-300'
-                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-            }`}>
+            <div
+              className={`rounded-xl border px-4 py-3 text-sm ${
+                error
+                  ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+              }`}
+            >
               <div className="whitespace-pre-line">{error ?? message}</div>
             </div>
 
@@ -457,8 +472,8 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
             </div>
 
             <div className="rounded-xl bg-slate-900/50 px-4 py-3 text-sm text-slate-400">
-              <p>1. 先掃任務條碼：任務條碼會是 `TSK` 開頭，掃一次加入工作站，再掃一次關閉。</p>
-              <p className="mt-2">2. 再掃學生身分條碼：學生碼通常是 `USR` 或 `STU` 開頭，會對所有符合規則的進行中任務一次發點。</p>
+              <p>1. 掃任務條碼：加入或關閉工作站中的任務。</p>
+              <p className="mt-2">2. 掃學生身分條碼：對所有符合規則的進行中任務一次發點。</p>
             </div>
           </section>
         </div>
@@ -470,7 +485,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
           </div>
 
           {logs.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-500">目前還沒有核發紀錄。</p>
+            <p className="py-6 text-center text-sm text-slate-500">目前還沒有新的核發紀錄。</p>
           ) : (
             <div className="mt-4 space-y-2">
               {logs.map(log => (
@@ -481,7 +496,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                   <div>
                     <p className="font-medium text-white">{log.student}</p>
                     <p className="text-sm text-slate-400">
-                      {log.task} · {log.time}
+                      {log.task} | {log.time}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">{log.message}</p>
                   </div>
