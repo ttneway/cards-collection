@@ -303,6 +303,7 @@ export default function TeacherStudentsPage() {
         .map(line => line.split(/\t|,/).map(cell => cell.trim()))
 
       let imported = 0
+      let provisioned = 0
 
       for (const row of rows) {
         const [
@@ -313,7 +314,8 @@ export default function TeacherStudentsPage() {
           seatNo = '',
           email = '',
           title = '',
-          roleText = 'student'
+          roleText = 'student',
+          initialPassword = ''
         ] = row
 
         if (!studentNo || !name) continue
@@ -322,27 +324,41 @@ export default function TeacherStudentsPage() {
         const role: Exclude<Role, 'teacher' | 'admin'> =
           roleText === 'leader' || roleText.includes('幹部') || roleText.includes('小老師') ? 'leader' : 'student'
 
-        const { error } = await supabase.from('student_rosters').upsert(
-          {
-            name,
-            student_no: studentNo,
-            seat_no: seatNo ? Number(seatNo) : null,
-            email: email || null,
-            role,
-            title: title || null,
-            class_id: classId,
-            scan_code: createScanCode('STU'),
-            created_by: user.id
-          },
-          { onConflict: 'created_by,student_no' }
-        )
+        const { data, error } = await supabase
+          .from('student_rosters')
+          .upsert(
+            {
+              name,
+              student_no: studentNo,
+              seat_no: seatNo ? Number(seatNo) : null,
+              email: email || null,
+              role,
+              title: title || null,
+              class_id: classId,
+              scan_code: createScanCode('STU'),
+              created_by: user.id
+            },
+            { onConflict: 'created_by,student_no' }
+          )
+          .select('*')
+          .single()
 
         if (error) throw error
+
+        if (initialPassword.trim()) {
+          await createManagedStudentAccount((data as EditableStudent).id, initialPassword.trim())
+          provisioned += 1
+        }
+
         imported += 1
       }
 
       setBatchText('')
-      setMessage(`已匯入 ${imported} 筆學生資料。`)
+      setMessage(
+        provisioned > 0
+          ? `已匯入 ${imported} 筆學生資料，並開通 ${provisioned} 個登入帳號。`
+          : `已匯入 ${imported} 筆學生資料。`
+      )
       await loadClasses()
       await loadStudents()
     } catch (caught: any) {
@@ -520,8 +536,11 @@ export default function TeacherStudentsPage() {
           onChange={event => setBatchText(event.target.value)}
           rows={5}
           className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500"
-          placeholder={'學號,姓名,班級,年級,座號,Email,職稱,角色\nA0101,王小明,701,7,1,,,student'}
+          placeholder={'學號,姓名,班級,年級,座號,Email,職稱,角色,初始密碼\nA0101,王小明,701,7,1,,,student,abc12345'}
         />
+        <p className="text-xs text-slate-500">
+          批次欄位順序：學號、姓名、班級、年級、座號、Email、職稱、角色、初始密碼。若有填初始密碼，就會同步建立登入帳號。
+        </p>
         <button
           onClick={importBatch}
           disabled={saving || !batchText.trim()}
