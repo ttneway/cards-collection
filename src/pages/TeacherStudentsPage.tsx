@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { Download, Plus, Printer, RefreshCw, Save, Search, Upload } from 'lucide-react'
 import BarcodeLabel from '../components/BarcodeLabel'
 import { ROLE_LABELS } from '../lib/constants'
@@ -81,9 +81,23 @@ export default function TeacherStudentsPage() {
     })
   }, [registeredProfiles, students, user?.id])
 
+  const registeredStudentProfiles = useMemo(() => {
+    const linkedProfileIds = new Set(
+      students
+        .map(student => student.auth_user_id)
+        .filter((value): value is string => Boolean(value))
+    )
+
+    return registeredProfiles.filter(profile => {
+      if (profile.id === user?.id) return false
+      if (linkedProfileIds.has(profile.id)) return false
+      return profile.role === 'student' || profile.role === 'leader'
+    })
+  }, [registeredProfiles, students, user?.id])
+
   const selectedRegisteredProfile = useMemo(
-    () => pendingRegisteredProfiles.find(profile => profile.id === selectedRegisteredId) ?? pendingRegisteredProfiles[0] ?? null,
-    [pendingRegisteredProfiles, selectedRegisteredId]
+    () => registeredStudentProfiles.find(profile => profile.id === selectedRegisteredId) ?? registeredStudentProfiles[0] ?? null,
+    [registeredStudentProfiles, selectedRegisteredId]
   )
 
   useEffect(() => {
@@ -852,20 +866,20 @@ export default function TeacherStudentsPage() {
 
       <section className="space-y-4 rounded-lg bg-slate-800 p-4">
         <div>
-          <h2 className="text-lg font-semibold text-white">自主註冊帳號待歸類</h2>
+          <h2 className="text-lg font-semibold text-white">已註冊學生帳號</h2>
           <p className="mt-1 text-sm text-slate-400">
-            這裡會列出自己註冊、但還沒正式歸入班級或角色規則的帳號。歸類後，身分碼會自動依規則切換為 `STU` 或 `TEA` 開頭。
+            這裡會列出自己註冊、尚未綁定到學生名冊的學生帳號。即使已經分班，也會保留在這裡，方便直接查看與列印身分條碼。
           </p>
         </div>
 
-        {pendingRegisteredProfiles.length === 0 ? (
+        {registeredStudentProfiles.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 px-4 py-8 text-center text-sm text-slate-500">
-            目前沒有待歸類的自主註冊帳號。
+            目前沒有可管理的已註冊學生帳號。
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
             <div className="max-h-[420px] space-y-2 overflow-y-auto rounded-lg bg-slate-900/30 p-3">
-              {pendingRegisteredProfiles.map(profile => (
+              {registeredStudentProfiles.map(profile => (
                 <button
                   key={profile.id}
                   type="button"
@@ -874,9 +888,20 @@ export default function TeacherStudentsPage() {
                     registeredDraft?.id === profile.id ? 'border-indigo-500 bg-indigo-600/20' : 'border-transparent bg-slate-700/40 hover:bg-slate-700'
                   }`}
                 >
-                  <p className="text-sm font-medium text-white">{profile.name}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-white">{profile.name}</p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] ${
+                        pendingRegisteredProfiles.some(item => item.id === profile.id)
+                          ? 'bg-amber-500/10 text-amber-300'
+                          : 'bg-emerald-500/10 text-emerald-300'
+                      }`}
+                    >
+                      {classes.find(item => item.id === profile.class_id)?.name ?? '待分班'}
+                    </span>
+                  </div>
                   <p className="mt-1 text-xs text-slate-400">{profile.email}</p>
-                  <p className="mt-1 text-[11px] text-amber-300">{profile.scan_code ?? '尚未產生身分碼'}</p>
+                  <p className="mt-1 text-[11px] text-indigo-300">{profile.scan_code ?? '尚未產生身分碼'}</p>
                 </button>
               ))}
             </div>
@@ -961,6 +986,17 @@ export default function TeacherStudentsPage() {
                 >
                   <Save size={16} /> 套用歸類
                 </button>
+
+                <BarcodeLabel
+                  value={registeredDraft.scan_code}
+                  label={`${registeredDraft.name} 身分條碼`}
+                  filename={`${registeredDraft.name}-registered-student-qr.png`}
+                  metaLines={[
+                    `班級：${classes.find(item => item.id === registeredDraft.class_id)?.name ?? '未指定班級'}`,
+                    `角色：${registeredDraft.role === 'leader' ? '幹部 / 小老師' : '學生'}`,
+                    `學號：${registeredDraft.student_id ?? '未填寫'}`
+                  ]}
+                />
               </div>
             ) : null}
           </div>
