@@ -5,9 +5,10 @@ import { ROLE_LABELS } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { createScanCode, downloadCsv, printBarcodeSheet } from '../utils/codes'
-import type { Class, Role, StudentRoster } from '../types'
+import type { Class, Profile, Role, StudentRoster } from '../types'
 
 type EditableStudent = StudentRoster
+type RegisteredProfile = Profile
 
 const emptyStudentForm = {
   name: '',
@@ -23,10 +24,13 @@ const emptyStudentForm = {
 export default function TeacherStudentsPage() {
   const { user } = useAuthStore()
   const [students, setStudents] = useState<EditableStudent[]>([])
+  const [registeredProfiles, setRegisteredProfiles] = useState<RegisteredProfile[]>([])
   const [classes, setClasses] = useState<Class[]>([])
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<EditableStudent | null>(null)
+  const [selectedRegisteredId, setSelectedRegisteredId] = useState<string | null>(null)
+  const [registeredDraft, setRegisteredDraft] = useState<RegisteredProfile | null>(null)
   const [studentForm, setStudentForm] = useState(emptyStudentForm)
   const [draftPassword, setDraftPassword] = useState('')
   const [classForm, setClassForm] = useState({ name: '', grade: 1 })
@@ -61,8 +65,29 @@ export default function TeacherStudentsPage() {
       })
   }, [printClassId, students])
 
+  const pendingRegisteredProfiles = useMemo(() => {
+    const linkedProfileIds = new Set(
+      students
+        .map(student => student.auth_user_id)
+        .filter((value): value is string => Boolean(value))
+    )
+
+    return registeredProfiles.filter(profile => {
+      if (profile.id === user?.id) return false
+      if (linkedProfileIds.has(profile.id)) return false
+
+      const prefix = (profile.scan_code ?? '').slice(0, 3).toUpperCase()
+      return prefix === 'USR' || (profile.role === 'student' && !profile.class_id)
+    })
+  }, [registeredProfiles, students, user?.id])
+
+  const selectedRegisteredProfile = useMemo(
+    () => pendingRegisteredProfiles.find(profile => profile.id === selectedRegisteredId) ?? pendingRegisteredProfiles[0] ?? null,
+    [pendingRegisteredProfiles, selectedRegisteredId]
+  )
+
   useEffect(() => {
-    void Promise.all([loadClasses(), loadStudents()])
+    void Promise.all([loadClasses(), loadStudents(), loadRegisteredProfiles()])
   }, [])
 
   useEffect(() => {
@@ -71,6 +96,12 @@ export default function TeacherStudentsPage() {
       setDraftPassword('')
     }
   }, [selected])
+
+  useEffect(() => {
+    if (selectedRegisteredProfile) {
+      setRegisteredDraft({ ...selectedRegisteredProfile })
+    }
+  }, [selectedRegisteredProfile])
 
   const createManagedStudentAccount = async (rosterId: string, password: string) => {
     const { data, error } = await supabase.functions.invoke('create-managed-student-account', {
@@ -194,6 +225,20 @@ export default function TeacherStudentsPage() {
     setSaving(false)
   }
 
+  const loadRegisteredProfiles = async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    setRegisteredProfiles((data ?? []) as RegisteredProfile[])
+  }
+
   const saveStudent = async () => {
     if (!draft) return
 
@@ -263,6 +308,45 @@ export default function TeacherStudentsPage() {
       await loadStudents()
     } catch (caught: any) {
       setError(caught?.message || '建立學生登入帳號失敗。')
+    }
+
+    setSaving(false)
+  }
+
+  const saveRegisteredProfile = async () => {
+    if (!registeredDraft) return
+
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+
+    const nextRole: Role =
+      user?.role === 'admin' && registeredDraft.role === 'teacher'
+        ? 'teacher'
+        : registeredDraft.role === 'leader'
+          ? 'leader'
+          : 'student'
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        name: registeredDraft.name.trim(),
+        title: registeredDraft.title?.trim() || null,
+        class_id: nextRole === 'teacher' ? null : registeredDraft.class_id || null,
+        student_id: registeredDraft.student_id?.trim() || null,
+        role: nextRole
+      })
+      .eq('id', registeredDraft.id)
+
+    if (error) {
+      setError(error.message)
+    } else {
+      setMessage(
+        nextRole === 'teacher'
+          ? `已將 ${registeredDraft.name} 歸類為教師，身分碼會自動改為 TEA 開頭。`
+          : `已更新 ${registeredDraft.name} 的班級歸類，身分碼會自動改為 STU 開頭。`
+      )
+      await loadRegisteredProfiles()
     }
 
     setSaving(false)
@@ -765,6 +849,123 @@ export default function TeacherStudentsPage() {
           </div>
         ) : null}
       </div>
+
+      <section className="space-y-4 rounded-lg bg-slate-800 p-4">
+        <div>
+          <h2 className="text-lg font-semibold text-white">自主註冊帳號待歸類</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            這裡會列出自己註冊、但還沒正式歸入班級或角色規則的帳號。歸類後，身分碼會自動依規則切換為 `STU` 或 `TEA` 開頭。
+          </p>
+        </div>
+
+        {pendingRegisteredProfiles.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 px-4 py-8 text-center text-sm text-slate-500">
+            目前沒有待歸類的自主註冊帳號。
+          </div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+            <div className="max-h-[420px] space-y-2 overflow-y-auto rounded-lg bg-slate-900/30 p-3">
+              {pendingRegisteredProfiles.map(profile => (
+                <button
+                  key={profile.id}
+                  type="button"
+                  onClick={() => setSelectedRegisteredId(profile.id)}
+                  className={`w-full rounded-lg border px-3 py-2 text-left ${
+                    registeredDraft?.id === profile.id ? 'border-indigo-500 bg-indigo-600/20' : 'border-transparent bg-slate-700/40 hover:bg-slate-700'
+                  }`}
+                >
+                  <p className="text-sm font-medium text-white">{profile.name}</p>
+                  <p className="mt-1 text-xs text-slate-400">{profile.email}</p>
+                  <p className="mt-1 text-[11px] text-amber-300">{profile.scan_code ?? '尚未產生身分碼'}</p>
+                </button>
+              ))}
+            </div>
+
+            {registeredDraft ? (
+              <div className="space-y-4 rounded-lg bg-slate-900/30 p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-400">姓名</label>
+                    <input
+                      value={registeredDraft.name}
+                      onChange={event => setRegisteredDraft({ ...registeredDraft, name: event.target.value })}
+                      className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-400">登入 Email</label>
+                    <input
+                      value={registeredDraft.email}
+                      readOnly
+                      className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-300 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-400">角色</label>
+                    <select
+                      value={registeredDraft.role}
+                      onChange={event => setRegisteredDraft({ ...registeredDraft, role: event.target.value as Role })}
+                      className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+                    >
+                      <option value="student">學生</option>
+                      <option value="leader">幹部 / 小老師</option>
+                      {user?.role === 'admin' ? <option value="teacher">教師</option> : null}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-400">班級</label>
+                    <select
+                      value={registeredDraft.class_id ?? ''}
+                      onChange={event => setRegisteredDraft({ ...registeredDraft, class_id: event.target.value || null })}
+                      disabled={registeredDraft.role === 'teacher'}
+                      className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500 disabled:opacity-50"
+                    >
+                      <option value="">未指定班級</option>
+                      {classes.map(item => (
+                        <option key={item.id} value={item.id}>
+                          {item.grade} 年級 · {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-400">學號 / 識別代碼</label>
+                    <input
+                      value={registeredDraft.student_id ?? ''}
+                      onChange={event => setRegisteredDraft({ ...registeredDraft, student_id: event.target.value })}
+                      className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm text-slate-400">職稱</label>
+                    <input
+                      value={registeredDraft.title ?? ''}
+                      onChange={event => setRegisteredDraft({ ...registeredDraft, title: event.target.value })}
+                      className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-3 text-sm text-slate-300">
+                  <p>目前身分碼：<span className="font-mono text-indigo-300">{registeredDraft.scan_code ?? '尚未產生'}</span></p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    規則：未歸類帳號為 `USR`，歸類到班級後改為 `STU`，管理者改成教師後改為 `TEA`。
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={saveRegisteredProfile}
+                  disabled={saving || (registeredDraft.role !== 'teacher' && !registeredDraft.class_id)}
+                  className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  <Save size={16} /> 套用歸類
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </section>
     </div>
   )
 }
