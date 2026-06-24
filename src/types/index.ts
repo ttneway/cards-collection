@@ -5,6 +5,7 @@ export type Rarity = 'N' | 'R' | 'SR' | 'SSR' | 'UR'
 export type TaskType = 'scan' | 'approve' | 'auto'
 
 export type TaskRecurrenceType = 'once' | 'daily' | 'weekly' | 'semester' | 'custom'
+export type TaskScopeType = 'school' | 'class'
 
 export type TradeStatus = 'pending' | 'approved' | 'rejected'
 
@@ -146,6 +147,7 @@ export interface Task {
   points: number
   task_code: string | null
   created_by: string
+  scope_type: TaskScopeType
   class_id: string | null
   recurrence_type: TaskRecurrenceType
   custom_reset_days: number | null
@@ -164,6 +166,10 @@ export interface Task {
   starts_at: string | null
   ends_at: string | null
   created_at: string
+  task_classes?: Array<{
+    class_id: string
+    class?: Class | null
+  }>
 }
 
 export interface TaskReward {

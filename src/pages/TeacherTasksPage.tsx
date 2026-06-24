@@ -15,7 +15,7 @@ import {
 import BarcodeLabel from '../components/BarcodeLabel'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
-import type { Task, TaskRecurrenceType } from '../types'
+import type { Class, Task, TaskRecurrenceType, TaskScopeType } from '../types'
 import { createScanCode, downloadCsv } from '../utils/codes'
 
 const RECURRENCE_LABELS: Record<TaskRecurrenceType, string> = {
@@ -24,6 +24,18 @@ const RECURRENCE_LABELS: Record<TaskRecurrenceType, string> = {
   weekly: '每週',
   semester: '學期',
   custom: '自訂'
+}
+
+const SCOPE_LABELS: Record<TaskScopeType, string> = {
+  school: '全校性任務',
+  class: '班級任務'
+}
+
+type TaskWithRelations = Task & {
+  task_classes?: Array<{
+    class_id: string
+    class?: Class | null
+  }>
 }
 
 interface CompletionRow {
@@ -46,6 +58,8 @@ type TaskForm = {
   title: string
   description: string
   points: number
+  scope_type: TaskScopeType
+  selected_class_ids: string[]
   recurrence_type: TaskRecurrenceType
   per_period_limit: number
   claim_cooldown_minutes: number
@@ -63,6 +77,8 @@ const emptyForm: TaskForm = {
   title: '',
   description: '',
   points: 10,
+  scope_type: 'school',
+  selected_class_ids: [],
   recurrence_type: 'daily',
   per_period_limit: 1,
   claim_cooldown_minutes: 0,
@@ -76,11 +92,35 @@ const emptyForm: TaskForm = {
   is_active: true
 }
 
-function mapTaskToForm(task: Task): TaskForm {
+function normalizeRelation<T>(value: T | T[] | null | undefined): T | undefined {
+  if (Array.isArray(value)) return value[0]
+  return value ?? undefined
+}
+
+function formatCooldown(minutes: number) {
+  if (minutes <= 0) return '無冷卻'
+  if (minutes < 60) return `${minutes} 分鐘`
+
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return remainingMinutes === 0 ? `${hours} 小時` : `${hours} 小時 ${remainingMinutes} 分鐘`
+}
+
+function scopeClassIds(task: TaskWithRelations) {
+  if (task.task_classes && task.task_classes.length > 0) {
+    return task.task_classes.map(item => item.class_id)
+  }
+  return task.class_id ? [task.class_id] : []
+}
+
+function mapTaskToForm(task: TaskWithRelations, currentUserRole?: string, currentUserClassId?: string | null): TaskForm {
+  const selectedClassIds = scopeClassIds(task)
   return {
     title: task.title,
     description: task.description ?? '',
     points: task.points,
+    scope_type: currentUserRole === 'leader' ? 'class' : task.scope_type ?? (selectedClassIds.length > 0 ? 'class' : 'school'),
+    selected_class_ids: currentUserRole === 'leader' && currentUserClassId ? [currentUserClassId] : selectedClassIds,
     recurrence_type: task.recurrence_type,
     per_period_limit: task.per_period_limit,
     claim_cooldown_minutes: task.claim_cooldown_minutes ?? 0,
@@ -95,24 +135,17 @@ function mapTaskToForm(task: Task): TaskForm {
   }
 }
 
-function formatCooldown(minutes: number) {
-  if (minutes <= 0) return '無冷卻'
-  if (minutes < 60) return `${minutes} 分鐘`
-
-  const hours = Math.floor(minutes / 60)
-  const remainingMinutes = minutes % 60
-  return remainingMinutes === 0 ? `${hours} 小時` : `${hours} 小時 ${remainingMinutes} 分鐘`
-}
-
-function normalizeRelation<T>(value: T | T[] | null | undefined): T | undefined {
-  if (Array.isArray(value)) return value[0]
-  return value ?? undefined
+function classNamesForTask(task: TaskWithRelations) {
+  return (task.task_classes ?? [])
+    .map(item => item.class?.name)
+    .filter((value): value is string => Boolean(value))
 }
 
 export default function TeacherTasksPage() {
   const { user } = useAuthStore()
   const [searchParams] = useSearchParams()
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [tasks, setTasks] = useState<TaskWithRelations[]>([])
+  const [classes, setClasses] = useState<Class[]>([])
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
   const [completions, setCompletions] = useState<CompletionRow[]>([])
@@ -132,7 +165,7 @@ export default function TeacherTasksPage() {
   )
 
   useEffect(() => {
-    void loadTasks()
+    void Promise.all([loadTasks(), loadClasses()])
   }, [])
 
   useEffect(() => {
@@ -147,10 +180,21 @@ export default function TeacherTasksPage() {
     }
   }, [selectedTask?.id])
 
+  useEffect(() => {
+    if (user?.role === 'leader' && user.class_id) {
+      const leaderClassId = user.class_id
+      setForm(previous => ({
+        ...previous,
+        scope_type: 'class',
+        selected_class_ids: [leaderClassId]
+      }))
+    }
+  }, [user?.class_id, user?.role])
+
   const loadTasks = async () => {
     const { data, error } = await supabase
       .from('tasks')
-      .select('*')
+      .select('*, task_classes(class_id, class:classes(id, name, grade, teacher_id, created_at))')
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -158,12 +202,27 @@ export default function TeacherTasksPage() {
       return
     }
 
-    const rows = (data ?? []) as Task[]
+    const rows = (data ?? []) as TaskWithRelations[]
     setTasks(rows)
 
     if (!selectedTaskId && rows[0]) {
       setSelectedTaskId(rows[0].id)
     }
+  }
+
+  const loadClasses = async () => {
+    const { data, error } = await supabase
+      .from('classes')
+      .select('*')
+      .order('grade')
+      .order('name')
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    setClasses((data ?? []) as Class[])
   }
 
   const loadCompletions = async (taskId: string) => {
@@ -199,45 +258,99 @@ export default function TeacherTasksPage() {
 
   const resetForm = () => {
     setEditingTaskId(null)
-    setForm(emptyForm)
+    setForm(user?.role === 'leader' && user.class_id
+      ? { ...emptyForm, scope_type: 'class', selected_class_ids: [user.class_id] }
+      : emptyForm)
     setError(null)
     setMessage(null)
   }
 
-  const beginEditTask = (task: Task) => {
+  const beginEditTask = (task: TaskWithRelations) => {
     setEditingTaskId(task.id)
-    setForm(mapTaskToForm(task))
+    setForm(mapTaskToForm(task, user?.role, user?.class_id))
     setSelectedTaskId(task.id)
     setError(null)
-    setMessage(`正在編輯「${task.title}」`)
+    setMessage(`正在編輯任務：${task.title}`)
     window.setTimeout(() => document.getElementById('task-title')?.focus(), 0)
   }
 
-  const buildTaskPayload = () => ({
-    title: form.title.trim(),
-    description: form.description.trim(),
-    points: Number(form.points),
-    recurrence_type: form.recurrence_type,
-    custom_reset_days: form.recurrence_type === 'custom' ? Number(form.custom_reset_days) : null,
-    per_period_limit: Number(form.per_period_limit),
-    claim_cooldown_minutes: Number(form.claim_cooldown_minutes),
-    allow_scanner: form.allow_scanner,
-    allow_button_claim: form.allow_button_claim,
-    scan_station_enabled: form.allow_scanner ? form.scan_station_enabled : false,
-    code_format: 'qr',
-    is_active: form.is_active,
-    scan_window_enabled: form.scan_window_enabled,
-    window_timezone: 'Asia/Taipei',
-    window_start_time: form.scan_window_enabled ? form.window_start_time : null,
-    window_end_time: form.scan_window_enabled ? form.window_end_time : null
-  })
+  const toggleClassSelection = (classId: string) => {
+    setForm(previous => {
+      const exists = previous.selected_class_ids.includes(classId)
+      return {
+        ...previous,
+        selected_class_ids: exists
+          ? previous.selected_class_ids.filter(item => item !== classId)
+          : [...previous.selected_class_ids, classId]
+      }
+    })
+  }
+
+  const buildTaskPayload = () => {
+    const selectedClassIds =
+      user?.role === 'leader' && user.class_id
+        ? [user.class_id]
+        : form.scope_type === 'class'
+          ? form.selected_class_ids
+          : []
+
+    return {
+      task: {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        points: Number(form.points),
+        scope_type: user?.role === 'leader' ? 'class' : form.scope_type,
+        class_id: selectedClassIds[0] ?? null,
+        recurrence_type: form.recurrence_type,
+        custom_reset_days: form.recurrence_type === 'custom' ? Number(form.custom_reset_days) : null,
+        per_period_limit: Number(form.per_period_limit),
+        claim_cooldown_minutes: Number(form.claim_cooldown_minutes),
+        allow_scanner: form.allow_scanner,
+        allow_button_claim: form.allow_button_claim,
+        scan_station_enabled: form.allow_scanner ? form.scan_station_enabled : false,
+        code_format: 'qr',
+        is_active: form.is_active,
+        scan_window_enabled: form.scan_window_enabled,
+        window_timezone: 'Asia/Taipei',
+        window_start_time: form.scan_window_enabled ? form.window_start_time : null,
+        window_end_time: form.scan_window_enabled ? form.window_end_time : null
+      },
+      classIds: selectedClassIds
+    }
+  }
+
+  const saveTaskScope = async (taskId: string, scopeType: TaskScopeType, classIds: string[]) => {
+    const { error } = await supabase.rpc('replace_task_classes', {
+      p_task_id: taskId,
+      p_scope_type: scopeType,
+      p_class_ids: classIds
+    })
+
+    if (error) {
+      throw new Error(error.message)
+    }
+  }
 
   const saveTask = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!user) return
 
     if (!form.allow_scanner && !form.allow_button_claim) {
-      setError('請至少啟用一種完成方式。')
+      setError('至少要選擇一種任務完成方式。')
+      return
+    }
+
+    const isLeader = user.role === 'leader'
+    const effectiveScope = isLeader ? 'class' : form.scope_type
+    const effectiveClassIds =
+      isLeader && user.class_id
+        ? [user.class_id]
+        : effectiveScope === 'class'
+          ? form.selected_class_ids
+          : []
+
+    if (effectiveScope === 'class' && effectiveClassIds.length === 0) {
+      setError('班級任務至少要選擇一個班級。')
       return
     }
 
@@ -245,47 +358,64 @@ export default function TeacherTasksPage() {
     setError(null)
     setMessage(null)
 
-    const taskPayload = buildTaskPayload()
+    try {
+      const taskPayload = buildTaskPayload()
 
-    if (!editingTaskId) {
-      const { error } = await supabase.from('tasks').insert({
-        ...taskPayload,
-        type: 'scan',
-        task_code: createScanCode('TASK'),
-        created_by: user.id,
-        class_id: user.role === 'leader' ? user.class_id : null
-      })
+      if (!editingTaskId) {
+        const { data, error } = await supabase
+          .from('tasks')
+          .insert({
+            ...taskPayload.task,
+            type: 'scan',
+            task_code: createScanCode('TSK'),
+            created_by: user.id
+          })
+          .select('id')
+          .single()
 
-      if (error) {
-        setError(error.message)
-      } else {
-        setForm(emptyForm)
+        if (error || !data) {
+          throw new Error(error?.message ?? '建立任務失敗。')
+        }
+
+        await saveTaskScope(data.id, effectiveScope, effectiveClassIds)
+
+        setForm(isLeader && user.class_id
+          ? { ...emptyForm, scope_type: 'class', selected_class_ids: [user.class_id] }
+          : emptyForm)
         setMessage('任務已建立。')
         await loadTasks()
+        setSelectedTaskId(data.id)
+      } else {
+        const { error } = await supabase
+          .from('tasks')
+          .update({
+            ...taskPayload.task,
+            scope_type: effectiveScope,
+            class_id: effectiveClassIds[0] ?? null
+          })
+          .eq('id', editingTaskId)
+
+        if (error) {
+          throw new Error(error.message)
+        }
+
+        await saveTaskScope(editingTaskId, effectiveScope, effectiveClassIds)
+
+        setMessage(`已儲存任務：${form.title.trim()}`)
+        await loadTasks()
+        setEditingTaskId(null)
+        setForm(isLeader && user.class_id
+          ? { ...emptyForm, scope_type: 'class', selected_class_ids: [user.class_id] }
+          : emptyForm)
       }
-
-      setSaving(false)
-      return
-    }
-
-    const { error } = await supabase
-      .from('tasks')
-      .update(taskPayload)
-      .eq('id', editingTaskId)
-
-    if (error) {
-      setError(error.message)
-    } else {
-      setMessage(`已更新「${form.title.trim()}」`)
-      await loadTasks()
-      setEditingTaskId(null)
-      setForm(emptyForm)
+    } catch (caught: any) {
+      setError(caught?.message || '儲存任務失敗。')
     }
 
     setSaving(false)
   }
 
-  const toggleTaskActive = async (task: Task) => {
+  const toggleTaskActive = async (task: TaskWithRelations) => {
     setError(null)
     setMessage(null)
 
@@ -299,14 +429,12 @@ export default function TeacherTasksPage() {
       return
     }
 
-    setMessage(task.is_active ? `已停用「${task.title}」` : `已啟用「${task.title}」`)
+    setMessage(task.is_active ? `已停用任務：${task.title}` : `已啟用任務：${task.title}`)
     await loadTasks()
   }
 
-  const softDeleteTask = async (task: Task) => {
-    const confirmed = window.confirm(
-      `確定要刪除「${task.title}」嗎？\n\n目前會將任務停用並保留既有紀錄。`
-    )
+  const softDeleteTask = async (task: TaskWithRelations) => {
+    const confirmed = window.confirm(`確定要刪除任務「${task.title}」嗎？\n\n任務會被停用，既有紀錄會保留。`)
     if (!confirmed) return
 
     setError(null)
@@ -326,7 +454,7 @@ export default function TeacherTasksPage() {
       resetForm()
     }
 
-    setMessage(`已刪除（停用）「${task.title}」`)
+    setMessage(`已停用任務：${task.title}`)
     await loadTasks()
   }
 
@@ -346,12 +474,16 @@ export default function TeacherTasksPage() {
     )
   }
 
+  const availableClasses = user?.role === 'leader'
+    ? classes.filter(item => item.id === user.class_id)
+    : classes
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">任務管理</h1>
-          <p className="text-sm text-slate-400">建立任務、列印條碼、查看發點紀錄。</p>
+          <p className="text-sm text-slate-400">建立任務、設定適用範圍、列印條碼與查看完成紀錄。</p>
         </div>
         <Link
           to="/scan"
@@ -367,15 +499,15 @@ export default function TeacherTasksPage() {
             {editingTask ? <Pencil size={18} className="text-amber-400" /> : <Plus size={18} className="text-indigo-400" />}
             {editingTask ? `編輯任務：${editingTask.title}` : '建立任務'}
           </h2>
-          {editingTask && (
+          {editingTask ? (
             <button
               type="button"
               onClick={resetForm}
-              className="flex cursor-pointer items-center gap-2 rounded-lg border-none bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
+              className="flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
             >
               <X size={16} /> 取消編輯
             </button>
-          )}
+          ) : null}
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -401,6 +533,68 @@ export default function TeacherTasksPage() {
               className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
             />
           </div>
+
+          <div className="sm:col-span-2">
+            <label className="mb-1 block text-sm text-slate-400">任務範圍</label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-sm text-slate-300">
+                <input
+                  type="radio"
+                  checked={(user?.role === 'leader' ? 'class' : form.scope_type) === 'school'}
+                  disabled={user?.role === 'leader'}
+                  onChange={() => setForm({ ...form, scope_type: 'school', selected_class_ids: [] })}
+                  className="accent-indigo-500"
+                />
+                全校性任務
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-sm text-slate-300">
+                <input
+                  type="radio"
+                  checked={(user?.role === 'leader' ? 'class' : form.scope_type) === 'class'}
+                  onChange={() =>
+                    setForm({
+                      ...form,
+                      scope_type: 'class',
+                      selected_class_ids: user?.role === 'leader' && user.class_id ? [user.class_id] : form.selected_class_ids
+                    })
+                  }
+                  className="accent-indigo-500"
+                />
+                班級任務
+              </label>
+            </div>
+            {user?.role === 'leader' ? (
+              <p className="mt-1 text-xs text-slate-500">幹部只能建立自己班級的任務。</p>
+            ) : null}
+          </div>
+
+          {(user?.role === 'leader' || form.scope_type === 'class') ? (
+            <div className="space-y-2 sm:col-span-2">
+              <label className="block text-sm text-slate-400">適用班級{user?.role !== 'leader' ? '（可複選）' : ''}</label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {availableClasses.map(item => {
+                  const checked = form.selected_class_ids.includes(item.id) || (user?.role === 'leader' && user.class_id === item.id)
+                  return (
+                    <label
+                      key={item.id}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                        checked ? 'border-indigo-500 bg-indigo-600/20 text-white' : 'border-slate-600 bg-slate-700/50 text-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={user?.role === 'leader'}
+                        onChange={() => toggleClassSelection(item.id)}
+                        className="accent-indigo-500"
+                      />
+                      {item.grade} 年級 · {item.name}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
 
           <div>
             <label className="mb-1 block text-sm text-slate-400">週期</label>
@@ -438,10 +632,10 @@ export default function TeacherTasksPage() {
               onChange={event => setForm({ ...form, claim_cooldown_minutes: Number(event.target.value) })}
               className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
             />
-            <p className="mt-1 text-xs text-slate-500">填 0 代表不限制兩次領取間隔。</p>
+            <p className="mt-1 text-xs text-slate-500">填 0 代表沒有冷卻時間。</p>
           </div>
 
-          {form.recurrence_type === 'custom' && (
+          {form.recurrence_type === 'custom' ? (
             <div>
               <label className="mb-1 block text-sm text-slate-400">自訂重置天數</label>
               <input
@@ -452,11 +646,11 @@ export default function TeacherTasksPage() {
                 className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
               />
             </div>
-          )}
+          ) : null}
 
           <div className="space-y-2 sm:col-span-2">
             <label className="block text-sm text-slate-400">完成方式</label>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               <label className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-sm text-slate-300">
                 <input
                   type="checkbox"
@@ -498,7 +692,7 @@ export default function TeacherTasksPage() {
             任務開放時間
           </label>
 
-          {form.scan_window_enabled && (
+          {form.scan_window_enabled ? (
             <>
               <div>
                 <label className="mb-1 block text-sm text-slate-400">開始時間</label>
@@ -520,7 +714,7 @@ export default function TeacherTasksPage() {
                 />
               </div>
             </>
-          )}
+          ) : null}
         </div>
 
         <div>
@@ -533,104 +727,113 @@ export default function TeacherTasksPage() {
           />
         </div>
 
-        {message && <p className="text-sm text-green-400">{message}</p>}
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {message ? <p className="text-sm text-green-400">{message}</p> : null}
+        {error ? <p className="text-sm text-red-400">{error}</p> : null}
 
         <button
           disabled={saving}
-          className="flex cursor-pointer items-center gap-2 rounded-lg border-none bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
         >
           <Save size={16} /> {saving ? '儲存中...' : editingTask ? '更新任務' : '建立任務'}
         </button>
       </form>
 
       <div className="grid gap-3">
-        {tasks.map(task => (
-          <div key={task.id} className="space-y-3 rounded-lg bg-slate-800 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="font-semibold">{task.title}</h3>
-                <p className="text-sm text-slate-400">{task.description || '尚無描述'}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {task.points} 點 · {RECURRENCE_LABELS[task.recurrence_type]} · 每週期上限 {task.per_period_limit} 次 ·{' '}
-                  {formatCooldown(task.claim_cooldown_minutes ?? 0)}
-                  {task.allow_scanner ? ' · 掃碼' : ''}
-                  {task.allow_button_claim ? ' · 按鈕完成' : ''}
-                  {task.scan_window_enabled && task.window_start_time && task.window_end_time
-                    ? ` · ${task.window_start_time.slice(0, 5)}-${task.window_end_time.slice(0, 5)}`
-                    : ''}
-                </p>
+        {tasks.map(task => {
+          const classNames = classNamesForTask(task)
+          return (
+            <div key={task.id} className="space-y-3 rounded-lg bg-slate-800 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold">{task.title}</h3>
+                  <p className="text-sm text-slate-400">{task.description || '尚無描述'}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {task.points} 點 · {SCOPE_LABELS[task.scope_type]} · {RECURRENCE_LABELS[task.recurrence_type]} · 每週期上限 {task.per_period_limit} 次 · {formatCooldown(task.claim_cooldown_minutes ?? 0)}
+                    {task.allow_scanner ? ' · 可掃碼' : ''}
+                    {task.allow_button_claim ? ' · 可按鈕完成' : ''}
+                    {task.scan_window_enabled && task.window_start_time && task.window_end_time
+                      ? ` · ${task.window_start_time.slice(0, 5)}-${task.window_end_time.slice(0, 5)}`
+                      : ''}
+                  </p>
+                  {task.scope_type === 'class' ? (
+                    <p className="mt-1 text-xs text-indigo-300">
+                      適用班級：{classNames.length > 0 ? classNames.join('、') : '未指定'}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-emerald-300">適用範圍：全校</p>
+                  )}
+                </div>
+
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                    task.is_active ? 'bg-green-600/20 text-green-300' : 'bg-slate-700 text-slate-400'
+                  }`}
+                >
+                  {task.is_active ? '啟用中' : '已停用'}
+                </span>
               </div>
 
-              <span
-                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                  task.is_active ? 'bg-green-600/20 text-green-300' : 'bg-slate-700 text-slate-400'
-                }`}
-              >
-                {task.is_active ? '啟用中' : '已停用'}
-              </span>
+              <BarcodeLabel
+                value={task.task_code}
+                label="任務條碼"
+                filename={`${task.title}-barcode.png`}
+                metaLines={[
+                  `任務：${task.title}`,
+                  `範圍：${task.scope_type === 'school' ? '全校' : classNames.join('、') || '班級任務'}`,
+                  `點數：${task.points}`
+                ]}
+              />
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => beginEditTask(task)}
+                  className="flex items-center gap-2 rounded-lg bg-amber-600/20 px-3 py-2 text-sm text-amber-300 hover:bg-amber-600/30"
+                >
+                  <Pencil size={16} /> 編輯
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => toggleTaskActive(task)}
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
+                    task.is_active
+                      ? 'bg-red-600/20 text-red-300 hover:bg-red-600/30'
+                      : 'bg-green-600/20 text-green-300 hover:bg-green-600/30'
+                  }`}
+                >
+                  {task.is_active ? <PowerOff size={16} /> : <Power size={16} />}
+                  {task.is_active ? '停用任務' : '啟用任務'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => softDeleteTask(task)}
+                  className="flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
+                >
+                  <Trash2 size={16} /> 刪除
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedTaskId(task.id)}
+                  className="flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
+                >
+                  <RefreshCw size={16} /> 查看紀錄
+                </button>
+              </div>
             </div>
-
-            <BarcodeLabel
-              value={task.task_code}
-              label="任務條碼"
-              filename={`${task.title}-barcode.png`}
-              metaLines={[
-                `任務：${task.title}`,
-                `點數：${task.points}`,
-                `週期：${RECURRENCE_LABELS[task.recurrence_type]}`
-              ]}
-            />
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => beginEditTask(task)}
-                className="flex cursor-pointer items-center gap-2 rounded-lg border-none bg-amber-600/20 px-3 py-2 text-sm text-amber-300 hover:bg-amber-600/30"
-              >
-                <Pencil size={16} /> 編輯
-              </button>
-
-              <button
-                type="button"
-                onClick={() => toggleTaskActive(task)}
-                className={`flex cursor-pointer items-center gap-2 rounded-lg border-none px-3 py-2 text-sm ${
-                  task.is_active
-                    ? 'bg-red-600/20 text-red-300 hover:bg-red-600/30'
-                    : 'bg-green-600/20 text-green-300 hover:bg-green-600/30'
-                }`}
-              >
-                {task.is_active ? <PowerOff size={16} /> : <Power size={16} />}
-                {task.is_active ? '停用任務' : '啟用任務'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => softDeleteTask(task)}
-                className="flex cursor-pointer items-center gap-2 rounded-lg border-none bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
-              >
-                <Trash2 size={16} /> 刪除
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedTaskId(task.id)}
-                className="flex cursor-pointer items-center gap-2 rounded-lg border-none bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
-              >
-                <RefreshCw size={16} /> 查看紀錄
-              </button>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
-      {selectedTask && (
+      {selectedTask ? (
         <div className="rounded-lg bg-slate-800 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="font-semibold">{selectedTask.title} 紀錄</h2>
+            <h2 className="font-semibold">{selectedTask.title} 完成紀錄</h2>
             <button
               onClick={exportRecords}
-              className="flex cursor-pointer items-center gap-2 rounded-lg border-none bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
+              className="flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
             >
               <Download size={16} /> 匯出 CSV
             </button>
@@ -653,14 +856,14 @@ export default function TeacherTasksPage() {
                   </div>
                   <div className="text-xs text-slate-400">
                     <p>{new Date(row.completed_at).toLocaleString('zh-TW')}</p>
-                    <p>發點者：{row.awarded_by_profile?.name ?? '系統'}</p>
+                    <p>核發者：{row.awarded_by_profile?.name ?? '系統'}</p>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }
