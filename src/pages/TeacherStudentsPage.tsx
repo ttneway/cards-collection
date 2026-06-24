@@ -14,6 +14,7 @@ const emptyStudentForm = {
   student_no: '',
   seat_no: '',
   email: '',
+  initial_password: '',
   role: 'student' as Exclude<Role, 'teacher' | 'admin'>,
   title: '',
   class_id: ''
@@ -27,6 +28,7 @@ export default function TeacherStudentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<EditableStudent | null>(null)
   const [studentForm, setStudentForm] = useState(emptyStudentForm)
+  const [draftPassword, setDraftPassword] = useState('')
   const [classForm, setClassForm] = useState({ name: '', grade: 1 })
   const [batchText, setBatchText] = useState('')
   const [printClassId, setPrintClassId] = useState('')
@@ -64,8 +66,30 @@ export default function TeacherStudentsPage() {
   }, [])
 
   useEffect(() => {
-    if (selected) setDraft({ ...selected })
+    if (selected) {
+      setDraft({ ...selected })
+      setDraftPassword('')
+    }
   }, [selected])
+
+  const createManagedStudentAccount = async (rosterId: string, password: string) => {
+    const { data, error } = await supabase.functions.invoke('create-managed-student-account', {
+      body: {
+        rosterId,
+        password
+      }
+    })
+
+    if (error) {
+      throw new Error(error.message)
+    }
+
+    if (data?.error) {
+      throw new Error(data.error)
+    }
+
+    return data as { action: 'created' | 'updated'; email: string; message: string }
+  }
 
   const loadStudents = async () => {
     const { data, error } = await supabase
@@ -131,23 +155,39 @@ export default function TeacherStudentsPage() {
     setError(null)
     setMessage(null)
 
-    const { error } = await supabase.from('student_rosters').insert({
-      name: studentForm.name.trim(),
-      student_no: studentForm.student_no.trim(),
-      seat_no: studentForm.seat_no ? Number(studentForm.seat_no) : null,
-      email: studentForm.email.trim() || null,
-      role: studentForm.role,
-      title: studentForm.title.trim() || null,
-      class_id: studentForm.class_id || null,
-      scan_code: createScanCode('STU'),
-      created_by: user.id
-    })
+    const { data, error } = await supabase
+      .from('student_rosters')
+      .insert({
+        name: studentForm.name.trim(),
+        student_no: studentForm.student_no.trim(),
+        seat_no: studentForm.seat_no ? Number(studentForm.seat_no) : null,
+        email: studentForm.email.trim() || null,
+        role: studentForm.role,
+        title: studentForm.title.trim() || null,
+        class_id: studentForm.class_id || null,
+        scan_code: createScanCode('STU'),
+        created_by: user.id
+      })
+      .select('*')
+      .single()
 
     if (error) {
       setError(error.message)
     } else {
+      const createdStudent = data as EditableStudent
+
+      if (studentForm.initial_password.trim()) {
+        try {
+          const result = await createManagedStudentAccount(createdStudent.id, studentForm.initial_password.trim())
+          setMessage(`${result.message} 登入帳號：${result.email}`)
+        } catch (accountError: any) {
+          setError(accountError?.message || '學生已建立，但登入帳號建立失敗。')
+        }
+      } else {
+        setMessage('已新增學生。尚未建立登入帳號。')
+      }
+
       setStudentForm(emptyStudentForm)
-      setMessage('已新增學生。')
       await loadStudents()
     }
 
@@ -200,6 +240,29 @@ export default function TeacherStudentsPage() {
       setDraft({ ...draft, scan_code: scanCode })
       setMessage('已重設身分條碼，舊條碼立即失效。')
       await loadStudents()
+    }
+
+    setSaving(false)
+  }
+
+  const provisionDraftAccount = async () => {
+    if (!draft) return
+    if (draftPassword.trim().length < 6) {
+      setError('請輸入至少 6 個字元的初始密碼。')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+
+    try {
+      const result = await createManagedStudentAccount(draft.id, draftPassword.trim())
+      setDraftPassword('')
+      setMessage(`${result.message} 登入帳號：${result.email}`)
+      await loadStudents()
+    } catch (caught: any) {
+      setError(caught?.message || '建立學生登入帳號失敗。')
     }
 
     setSaving(false)
@@ -428,7 +491,17 @@ export default function TeacherStudentsPage() {
               placeholder="Email（選填）"
               className="sm:col-span-2 rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
             />
+            <input
+              type="password"
+              value={studentForm.initial_password}
+              onChange={event => setStudentForm({ ...studentForm, initial_password: event.target.value })}
+              placeholder="初始密碼（選填，至少 6 碼）"
+              className="sm:col-span-2 rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+            />
           </div>
+          <p className="text-xs text-slate-500">
+            若有填初始密碼，系統會同步建立學生登入帳號。之後學生可用 Email、姓名或身分條碼登入。
+          </p>
           <button
             disabled={saving || !studentForm.name.trim() || !studentForm.student_no.trim()}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
@@ -523,6 +596,9 @@ export default function TeacherStudentsPage() {
                 <span className="text-[11px] text-indigo-300">
                   {ROLE_LABELS[student.role]} · {student.points} 點
                 </span>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {student.auth_user_id ? '已建立登入帳號' : '尚未建立登入帳號'}
+                </p>
               </button>
             ))
           )}
@@ -616,6 +692,44 @@ export default function TeacherStudentsPage() {
                 >
                   <RefreshCw size={16} /> 重設身分條碼
                 </button>
+              </div>
+
+              <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">學生登入帳號</h3>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {draft.auth_user_id
+                        ? '這位學生已經有登入帳號，可以在這裡重設初始密碼。'
+                        : '這位學生目前只有名冊資料，還沒有可登入的帳號。'}
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    draft.auth_user_id ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'
+                  }`}>
+                    {draft.auth_user_id ? '已開通登入' : '尚未開通'}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <input
+                    type="password"
+                    value={draftPassword}
+                    onChange={event => setDraftPassword(event.target.value)}
+                    placeholder={draft.auth_user_id ? '輸入新密碼（至少 6 碼）' : '輸入初始密碼（至少 6 碼）'}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    onClick={provisionDraftAccount}
+                    disabled={saving || draftPassword.trim().length < 6}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    {draft.auth_user_id ? '重設登入密碼' : '建立登入帳號'}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  建立完成後，學生可以用 Email、姓名或身分條碼搭配密碼登入。
+                </p>
               </div>
             </div>
 

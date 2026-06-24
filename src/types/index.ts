@@ -69,6 +69,7 @@ export interface Class {
 
 export interface StudentRoster {
   id: string
+  auth_user_id: string | null
   name: string
   student_no: string
   seat_no: number | null
