@@ -161,7 +161,9 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     throw new Error(`讀取個人資料失敗：${error.message}`)
   }
 
-  if (profile) return profile as Profile
+  if (profile) {
+    return await ensureProfileHasScanCode(profile as Profile)
+  }
 
   const { data: userData, error: userError } = await supabase.auth.getUser()
   if (userError) {
@@ -176,10 +178,12 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     email: userData.user.email ?? '',
     name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '未命名使用者',
     role: 'student',
+    title: null,
     stars: 0,
     class_id: null,
     student_id: null,
     avatar_url: null,
+    scan_code: null,
     hide_high_rarity_announcements: false,
     created_at: new Date().toISOString()
   }
@@ -194,7 +198,24 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     throw new Error(`建立個人資料失敗：${insertError.message}`)
   }
 
-  return insertedProfile as Profile
+  return await ensureProfileHasScanCode(insertedProfile as Profile)
+}
+
+async function ensureProfileHasScanCode(profile: Profile): Promise<Profile> {
+  if (profile.scan_code) return profile
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ scan_code: '' })
+    .eq('id', profile.id)
+    .select('*')
+    .single()
+
+  if (error) {
+    throw new Error(`補發身分條碼失敗：${error.message}`)
+  }
+
+  return data as Profile
 }
 
 async function resolveLoginIdentifier(identifier: string, mode: LoginMode): Promise<string> {
