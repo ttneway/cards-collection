@@ -5,17 +5,31 @@ import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants
 import { useAuthStore } from '../stores/authStore'
 import type { Card } from '../types'
 
+type AlbumSummary = {
+  name: string
+  cards: Card[]
+  ownedTypes: number
+  totalTypes: number
+  ownedCopies: number
+}
+
+function sortAlbumNames(names: string[]) {
+  return [...names].sort((left, right) => left.localeCompare(right, 'zh-Hant'))
+}
+
 export default function CardLibraryPage() {
   const { user } = useAuthStore()
   const [cards, setCards] = useState<Card[]>([])
   const [ownedCounts, setOwnedCounts] = useState<Record<string, number>>({})
-  const [filter, setFilter] = useState<string>('all')
+  const [rarityFilter, setRarityFilter] = useState<string>('all')
+  const [albumFilter, setAlbumFilter] = useState<string>('all')
 
   useEffect(() => {
     supabase
       .from('cards')
       .select('*')
       .eq('is_active', true)
+      .order('series')
       .order('created_at', { ascending: false })
       .then(({ data }) => {
         if (data) setCards(data as Card[])
@@ -39,7 +53,36 @@ export default function CardLibraryPage() {
       })
   }, [user])
 
-  const filteredCards = filter === 'all' ? cards : cards.filter(card => card.rarity === filter)
+  const albumNames = useMemo(() => {
+    const names = new Set(cards.map(card => card.series || '未分類'))
+    return sortAlbumNames(Array.from(names))
+  }, [cards])
+
+  const albumSummaries = useMemo<AlbumSummary[]>(() => {
+    return albumNames.map(name => {
+      const albumCards = cards.filter(card => (card.series || '未分類') === name)
+      const ownedTypes = albumCards.filter(card => (ownedCounts[card.id] ?? 0) > 0).length
+      const ownedCopies = albumCards.reduce((sum, card) => sum + Math.max(ownedCounts[card.id] ?? 0, 0), 0)
+
+      return {
+        name,
+        cards: albumCards,
+        ownedTypes,
+        totalTypes: albumCards.length,
+        ownedCopies
+      }
+    })
+  }, [albumNames, cards, ownedCounts])
+
+  const filteredByAlbum = useMemo(() => {
+    if (albumFilter === 'all') return cards
+    return cards.filter(card => (card.series || '未分類') === albumFilter)
+  }, [albumFilter, cards])
+
+  const filteredCards = useMemo(() => {
+    if (rarityFilter === 'all') return filteredByAlbum
+    return filteredByAlbum.filter(card => card.rarity === rarityFilter)
+  }, [filteredByAlbum, rarityFilter])
 
   const totalOwnedCopies = useMemo(
     () => Object.values(ownedCounts).reduce((sum, count) => sum + Math.max(count, 0), 0),
@@ -51,12 +94,19 @@ export default function CardLibraryPage() {
     [ownedCounts]
   )
 
-  const grouped = RARITY_ORDER.map(rarity => ({
-    rarity,
-    label: formatRarityLabel(rarity),
-    color: RARITY_COLORS[rarity],
-    cards: filteredCards.filter(card => card.rarity === rarity)
-  })).filter(group => group.cards.length > 0)
+  const activeAlbumSummary = useMemo(() => {
+    if (albumFilter === 'all') return null
+    return albumSummaries.find(summary => summary.name === albumFilter) ?? null
+  }, [albumFilter, albumSummaries])
+
+  const grouped = useMemo(() => {
+    return RARITY_ORDER.map(rarity => ({
+      rarity,
+      label: formatRarityLabel(rarity),
+      color: RARITY_COLORS[rarity],
+      cards: filteredCards.filter(card => card.rarity === rarity)
+    })).filter(group => group.cards.length > 0)
+  }, [filteredCards])
 
   return (
     <div className="space-y-6">
@@ -67,16 +117,87 @@ export default function CardLibraryPage() {
         </p>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-2">
+      <section className="space-y-4 rounded-2xl bg-slate-800 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-white">收集冊</h2>
+            <p className="mt-1 text-sm text-slate-400">每本收集冊代表一個主題，卡片不會跨冊重複。</p>
+          </div>
+          {activeAlbumSummary ? (
+            <div className="rounded-xl bg-slate-900/50 px-3 py-2 text-right text-sm">
+              <p className="text-white">{activeAlbumSummary.name}</p>
+              <p className="text-slate-400">
+                {activeAlbumSummary.ownedTypes} / {activeAlbumSummary.totalTypes} 種，{activeAlbumSummary.ownedCopies} 張
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          <button
+            onClick={() => setAlbumFilter('all')}
+            className={`rounded-full border-none px-3 py-1.5 text-sm whitespace-nowrap ${
+              albumFilter === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            全部收集冊
+          </button>
+          {albumSummaries.map(summary => (
+            <button
+              key={summary.name}
+              onClick={() => setAlbumFilter(summary.name)}
+              className={`rounded-full border-none px-3 py-1.5 text-sm whitespace-nowrap ${
+                albumFilter === summary.name ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              {summary.name} {summary.ownedTypes}/{summary.totalTypes}
+            </button>
+          ))}
+        </div>
+
+        {albumFilter === 'all' ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {albumSummaries.map(summary => {
+              const completionPercent =
+                summary.totalTypes === 0 ? 0 : Math.round((summary.ownedTypes / summary.totalTypes) * 100)
+
+              return (
+                <button
+                  key={summary.name}
+                  onClick={() => setAlbumFilter(summary.name)}
+                  className="rounded-2xl bg-slate-900/40 p-4 text-left transition hover:bg-slate-900/70"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-white">{summary.name}</p>
+                      <p className="mt-1 text-sm text-slate-400">
+                        {summary.ownedTypes} / {summary.totalTypes} 種，{summary.ownedCopies} 張
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-indigo-500/10 px-2.5 py-1 text-xs text-indigo-300">
+                      {completionPercent}%
+                    </span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-700">
+                    <div className="h-full rounded-full bg-indigo-500" style={{ width: `${completionPercent}%` }} />
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+      </section>
+
+      <div className="flex flex-wrap gap-2">
         {['all', ...RARITY_ORDER].map(rarity => (
           <button
             key={rarity}
-            onClick={() => setFilter(rarity)}
+            onClick={() => setRarityFilter(rarity)}
             className={`cursor-pointer rounded-full border-none px-3 py-1.5 text-sm font-medium whitespace-nowrap ${
-              filter === rarity ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              rarityFilter === rarity ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
             }`}
           >
-            {rarity === 'all' ? '全部' : formatRarityLabel(rarity)}
+            {rarity === 'all' ? '全部稀有度' : formatRarityLabel(rarity)}
           </button>
         ))}
       </div>
@@ -84,7 +205,7 @@ export default function CardLibraryPage() {
       {grouped.length === 0 ? (
         <div className="rounded-2xl bg-slate-800 py-12 text-center text-slate-500">
           <LibraryBig size={40} className="mx-auto mb-3 text-slate-600" />
-          <p>這個篩選條件下沒有卡片。</p>
+          <p>這本收集冊目前沒有符合條件的卡牌。</p>
         </div>
       ) : (
         grouped.map(group => (
