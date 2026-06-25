@@ -3,23 +3,27 @@ import { LibraryBig } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import { useAuthStore } from '../stores/authStore'
-import type { Card } from '../types'
+import type { Card, CardAlbum } from '../types'
+
+type CardWithAlbum = Card & { album?: CardAlbum | null }
 
 type AlbumSummary = {
+  id: string
   name: string
-  cards: Card[]
+  cover_color: string
+  cards: CardWithAlbum[]
   ownedTypes: number
   totalTypes: number
   ownedCopies: number
 }
 
-function sortAlbumNames(names: string[]) {
-  return [...names].sort((left, right) => left.localeCompare(right, 'zh-Hant'))
+function getAlbumName(card: CardWithAlbum) {
+  return card.album?.name ?? card.series ?? '未分類'
 }
 
 export default function CardLibraryPage() {
   const { user } = useAuthStore()
-  const [cards, setCards] = useState<Card[]>([])
+  const [cards, setCards] = useState<CardWithAlbum[]>([])
   const [ownedCounts, setOwnedCounts] = useState<Record<string, number>>({})
   const [rarityFilter, setRarityFilter] = useState<string>('all')
   const [albumFilter, setAlbumFilter] = useState<string>('all')
@@ -27,12 +31,11 @@ export default function CardLibraryPage() {
   useEffect(() => {
     supabase
       .from('cards')
-      .select('*')
+      .select('*, album:album_id(*)')
       .eq('is_active', true)
-      .order('series')
       .order('created_at', { ascending: false })
       .then(({ data }) => {
-        if (data) setCards(data as Card[])
+        if (data) setCards(data as CardWithAlbum[])
       })
 
     if (!user) return
@@ -53,30 +56,38 @@ export default function CardLibraryPage() {
       })
   }, [user])
 
-  const albumNames = useMemo(() => {
-    const names = new Set(cards.map(card => card.series || '未分類'))
-    return sortAlbumNames(Array.from(names))
-  }, [cards])
-
   const albumSummaries = useMemo<AlbumSummary[]>(() => {
-    return albumNames.map(name => {
-      const albumCards = cards.filter(card => (card.series || '未分類') === name)
-      const ownedTypes = albumCards.filter(card => (ownedCounts[card.id] ?? 0) > 0).length
-      const ownedCopies = albumCards.reduce((sum, card) => sum + Math.max(ownedCounts[card.id] ?? 0, 0), 0)
+    const groups = new Map<string, AlbumSummary>()
 
-      return {
-        name,
-        cards: albumCards,
-        ownedTypes,
-        totalTypes: albumCards.length,
-        ownedCopies
+    cards.forEach(card => {
+      const albumKey = card.album_id ?? `series:${getAlbumName(card)}`
+      const existing = groups.get(albumKey)
+
+      if (existing) {
+        existing.cards.push(card)
+        existing.totalTypes += 1
+        if ((ownedCounts[card.id] ?? 0) > 0) existing.ownedTypes += 1
+        existing.ownedCopies += Math.max(ownedCounts[card.id] ?? 0, 0)
+        return
       }
+
+      groups.set(albumKey, {
+        id: albumKey,
+        name: getAlbumName(card),
+        cover_color: card.album?.cover_color ?? card.color ?? '#334155',
+        cards: [card],
+        ownedTypes: (ownedCounts[card.id] ?? 0) > 0 ? 1 : 0,
+        totalTypes: 1,
+        ownedCopies: Math.max(ownedCounts[card.id] ?? 0, 0)
+      })
     })
-  }, [albumNames, cards, ownedCounts])
+
+    return Array.from(groups.values()).sort((left, right) => left.name.localeCompare(right.name, 'zh-Hant'))
+  }, [cards, ownedCounts])
 
   const filteredByAlbum = useMemo(() => {
     if (albumFilter === 'all') return cards
-    return cards.filter(card => (card.series || '未分類') === albumFilter)
+    return cards.filter(card => (card.album_id ?? `series:${getAlbumName(card)}`) === albumFilter)
   }, [albumFilter, cards])
 
   const filteredCards = useMemo(() => {
@@ -96,7 +107,7 @@ export default function CardLibraryPage() {
 
   const activeAlbumSummary = useMemo(() => {
     if (albumFilter === 'all') return null
-    return albumSummaries.find(summary => summary.name === albumFilter) ?? null
+    return albumSummaries.find(summary => summary.id === albumFilter) ?? null
   }, [albumFilter, albumSummaries])
 
   const grouped = useMemo(() => {
@@ -121,7 +132,7 @@ export default function CardLibraryPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold text-white">收集冊</h2>
-            <p className="mt-1 text-sm text-slate-400">每本收集冊代表一個主題，卡片不會跨冊重複。</p>
+            <p className="mt-1 text-sm text-slate-400">每本收集冊代表一個主題，學生可以逐冊查看完成進度。</p>
           </div>
           {activeAlbumSummary ? (
             <div className="rounded-xl bg-slate-900/50 px-3 py-2 text-right text-sm">
@@ -144,10 +155,10 @@ export default function CardLibraryPage() {
           </button>
           {albumSummaries.map(summary => (
             <button
-              key={summary.name}
-              onClick={() => setAlbumFilter(summary.name)}
+              key={summary.id}
+              onClick={() => setAlbumFilter(summary.id)}
               className={`rounded-full border-none px-3 py-1.5 text-sm whitespace-nowrap ${
-                albumFilter === summary.name ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                albumFilter === summary.id ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
               }`}
             >
               {summary.name} {summary.ownedTypes}/{summary.totalTypes}
@@ -163,14 +174,15 @@ export default function CardLibraryPage() {
 
               return (
                 <button
-                  key={summary.name}
-                  onClick={() => setAlbumFilter(summary.name)}
-                  className="rounded-2xl bg-slate-900/40 p-4 text-left transition hover:bg-slate-900/70"
+                  key={summary.id}
+                  onClick={() => setAlbumFilter(summary.id)}
+                  className="rounded-2xl p-4 text-left transition hover:brightness-110"
+                  style={{ backgroundColor: `${summary.cover_color}22` }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="font-semibold text-white">{summary.name}</p>
-                      <p className="mt-1 text-sm text-slate-400">
+                      <p className="mt-1 text-sm text-slate-300">
                         {summary.ownedTypes} / {summary.totalTypes} 種，{summary.ownedCopies} 張
                       </p>
                     </div>
@@ -241,7 +253,7 @@ export default function CardLibraryPage() {
                     </div>
 
                     <p className="truncate text-sm font-medium text-white">{card.name}</p>
-                    <p className="mt-1 text-[11px] text-white/70">{card.series}</p>
+                    <p className="mt-1 text-[11px] text-white/70">{getAlbumName(card)}</p>
                   </div>
                 )
               })}

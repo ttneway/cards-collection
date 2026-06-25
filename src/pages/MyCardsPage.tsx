@@ -3,14 +3,23 @@ import { CreditCard } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import { useAuthStore } from '../stores/authStore'
-import type { Card, UserCard } from '../types'
+import type { Card, CardAlbum, UserCard } from '../types'
 
-type OwnedCardRow = UserCard & { card: Card }
+type OwnedCardRow = UserCard & { card: Card & { album?: CardAlbum | null } }
 
 type AlbumOwnedSummary = {
+  id: string
   name: string
-  rows: OwnedCardRow[]
+  totalTypes: number
   totalCopies: number
+}
+
+function getAlbumName(row: OwnedCardRow) {
+  return row.card.album?.name ?? row.card.series ?? '未分類'
+}
+
+function getAlbumKey(row: OwnedCardRow) {
+  return row.card.album_id ?? `series:${getAlbumName(row)}`
 }
 
 export default function MyCardsPage() {
@@ -24,7 +33,7 @@ export default function MyCardsPage() {
 
     supabase
       .from('user_cards')
-      .select('*, card:card_id(*)')
+      .select('*, card:card_id(*, album:album_id(*))')
       .eq('user_id', user.id)
       .order('acquired_at', { ascending: false })
       .then(({ data }) => {
@@ -38,27 +47,32 @@ export default function MyCardsPage() {
   )
 
   const albumSummaries = useMemo<AlbumOwnedSummary[]>(() => {
-    const groups = new Map<string, OwnedCardRow[]>()
+    const groups = new Map<string, AlbumOwnedSummary>()
 
     userCards.forEach(row => {
-      const albumName = row.card.series || '未分類'
-      const rows = groups.get(albumName) ?? []
-      rows.push(row)
-      groups.set(albumName, rows)
+      const key = getAlbumKey(row)
+      const current = groups.get(key)
+
+      if (current) {
+        current.totalTypes += 1
+        current.totalCopies += Math.max(row.count ?? 0, 0)
+        return
+      }
+
+      groups.set(key, {
+        id: key,
+        name: getAlbumName(row),
+        totalTypes: 1,
+        totalCopies: Math.max(row.count ?? 0, 0)
+      })
     })
 
-    return Array.from(groups.entries())
-      .map(([name, rows]) => ({
-        name,
-        rows,
-        totalCopies: rows.reduce((sum, row) => sum + Math.max(row.count ?? 0, 0), 0)
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hant'))
+    return Array.from(groups.values()).sort((left, right) => left.name.localeCompare(right.name, 'zh-Hant'))
   }, [userCards])
 
   const filteredByAlbum = useMemo(() => {
     if (albumFilter === 'all') return userCards
-    return userCards.filter(row => (row.card.series || '未分類') === albumFilter)
+    return userCards.filter(row => getAlbumKey(row) === albumFilter)
   }, [albumFilter, userCards])
 
   const filteredCards = useMemo(() => {
@@ -68,7 +82,7 @@ export default function MyCardsPage() {
 
   const activeAlbum = useMemo(() => {
     if (albumFilter === 'all') return null
-    return albumSummaries.find(item => item.name === albumFilter) ?? null
+    return albumSummaries.find(item => item.id === albumFilter) ?? null
   }, [albumFilter, albumSummaries])
 
   return (
@@ -91,7 +105,7 @@ export default function MyCardsPage() {
               <div className="rounded-xl bg-slate-900/50 px-3 py-2 text-right text-sm">
                 <p className="text-white">{activeAlbum.name}</p>
                 <p className="text-slate-400">
-                  {activeAlbum.rows.length} 種，{activeAlbum.totalCopies} 張
+                  {activeAlbum.totalTypes} 種，{activeAlbum.totalCopies} 張
                 </p>
               </div>
             ) : null}
@@ -108,13 +122,13 @@ export default function MyCardsPage() {
             </button>
             {albumSummaries.map(summary => (
               <button
-                key={summary.name}
-                onClick={() => setAlbumFilter(summary.name)}
+                key={summary.id}
+                onClick={() => setAlbumFilter(summary.id)}
                 className={`rounded-full border-none px-3 py-1.5 text-sm whitespace-nowrap ${
-                  albumFilter === summary.name ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  albumFilter === summary.id ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                 }`}
               >
-                {summary.name} {summary.rows.length} 種 / {summary.totalCopies} 張
+                {summary.name} {summary.totalTypes} 種 / {summary.totalCopies} 張
               </button>
             ))}
           </div>
@@ -165,7 +179,7 @@ export default function MyCardsPage() {
               <p className="mt-1 text-[11px]" style={{ color: RARITY_COLORS[row.card.rarity] }}>
                 {formatRarityLabel(row.card.rarity)}
               </p>
-              <p className="mt-1 text-[11px] text-white/70">{row.card.series}</p>
+              <p className="mt-1 text-[11px] text-white/70">{getAlbumName(row)}</p>
             </div>
           ))}
         </div>

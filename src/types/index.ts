@@ -97,9 +97,20 @@ export interface Card {
   rarity: Rarity
   description: string
   series: string
+  album_id: string | null
   image_url: string | null
   color: string
   is_limited: boolean
+  is_active: boolean
+  created_at: string
+  album?: CardAlbum | null
+}
+
+export interface CardAlbum {
+  id: string
+  name: string
+  description: string
+  cover_color: string
   is_active: boolean
   created_at: string
 }
