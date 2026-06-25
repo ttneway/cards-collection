@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Pencil, Plus, Power, PowerOff, Save, Trophy, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { RARITY_LABELS, RARITY_ORDER } from '../lib/constants'
+import { formatRarityLabel, RARITY_ORDER } from '../lib/constants'
 import type { Achievement, AchievementConditionType, Card, Rarity } from '../types'
 
 type AchievementForm = {
@@ -64,7 +64,7 @@ function conditionSummary(item: Achievement) {
     case 'series_complete':
       return `完成系列：${item.condition_series || '未指定'}`
     case 'rarity_collection':
-      return `收集 ${RARITY_LABELS[item.condition_rarity as Rarity] || item.condition_rarity} ${item.condition_value} 張`
+      return `收集 ${formatRarityLabel(item.condition_rarity as Rarity)} ${item.condition_value} 張`
     default:
       return '未設定條件'
   }
@@ -251,7 +251,7 @@ export default function TeacherAchievementsPage() {
             <option value="">不指定稀有度</option>
             {RARITY_ORDER.map(rarity => (
               <option key={rarity} value={rarity}>
-                {RARITY_LABELS[rarity]}
+                {formatRarityLabel(rarity)}
               </option>
             ))}
           </select>

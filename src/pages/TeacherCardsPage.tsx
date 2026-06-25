@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BookOpen, Pencil, Plus, Power, PowerOff, Save, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { RARITY_COLORS, RARITY_LABELS, RARITY_ORDER } from '../lib/constants'
+import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import type { Card, CardAlbum, Rarity } from '../types'
 
 type CardWithAlbum = Card & { album?: CardAlbum | null }
@@ -444,7 +444,7 @@ export default function TeacherCardsPage() {
             >
               {RARITY_ORDER.map(rarity => (
                 <option key={rarity} value={rarity}>
-                  {RARITY_LABELS[rarity]}
+                  {formatRarityLabel(rarity)}
                 </option>
               ))}
             </select>
@@ -518,7 +518,7 @@ export default function TeacherCardsPage() {
             className={`rounded-full px-3 py-1.5 text-sm ${filter === rarity ? 'text-white' : 'bg-slate-800 text-slate-400'}`}
             style={filter === rarity ? { backgroundColor: RARITY_COLORS[rarity] } : undefined}
           >
-            {RARITY_LABELS[rarity]}
+            {formatRarityLabel(rarity)}
           </button>
         ))}
       </div>
@@ -529,7 +529,7 @@ export default function TeacherCardsPage() {
             <div className="aspect-[3/4] rounded-lg p-3 text-white" style={{ backgroundColor: card.color || '#334155' }}>
               <div className="flex h-full flex-col justify-between rounded-lg bg-black/15 p-3">
                 <div className="flex items-start justify-between gap-2">
-                  <span className="rounded-full bg-black/20 px-2 py-1 text-[11px]">{RARITY_LABELS[card.rarity]}</span>
+                  <span className="rounded-full bg-black/20 px-2 py-1 text-[11px]">{formatRarityLabel(card.rarity)}</span>
                   <span className={`rounded-full px-2 py-1 text-[11px] ${card.is_active ? 'bg-green-600/30' : 'bg-slate-700/70'}`}>
                     {card.is_active ? '啟用中' : '已停用'}
                   </span>
