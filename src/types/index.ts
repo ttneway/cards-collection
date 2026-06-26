@@ -6,6 +6,7 @@ export type TaskType = 'scan' | 'approve' | 'auto'
 
 export type TaskRecurrenceType = 'once' | 'daily' | 'weekly' | 'semester' | 'custom'
 export type TaskScopeType = 'school' | 'class'
+export type TaskOpenerRole = 'leader' | 'teacher'
 
 export type TradeStatus = 'pending' | 'approved' | 'rejected'
 
@@ -166,6 +167,7 @@ export interface Task {
   claim_cooldown_minutes: number
   allow_scanner: boolean
   allow_button_claim: boolean
+  allowed_opener_roles: TaskOpenerRole[]
   scan_station_enabled: boolean
   scan_window_enabled: boolean
   window_start_time: string | null

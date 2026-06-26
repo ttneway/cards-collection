@@ -15,7 +15,7 @@ import {
 import BarcodeLabel from '../components/BarcodeLabel'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
-import type { Class, Task, TaskRecurrenceType, TaskScopeType } from '../types'
+import type { Class, Task, TaskOpenerRole, TaskRecurrenceType, TaskScopeType } from '../types'
 import { createScanCode, downloadCsv } from '../utils/codes'
 
 const RECURRENCE_LABELS: Record<TaskRecurrenceType, string> = {
@@ -27,8 +27,13 @@ const RECURRENCE_LABELS: Record<TaskRecurrenceType, string> = {
 }
 
 const SCOPE_LABELS: Record<TaskScopeType, string> = {
-  school: '全校性任務',
+  school: '全校任務',
   class: '班級任務'
+}
+
+const OPENER_ROLE_LABELS: Record<TaskOpenerRole, string> = {
+  leader: '幹部 / 小老師',
+  teacher: '教師'
 }
 
 type TaskWithRelations = Task & {
@@ -66,6 +71,7 @@ type TaskForm = {
   custom_reset_days: number
   allow_scanner: boolean
   allow_button_claim: boolean
+  allowed_opener_roles: TaskOpenerRole[]
   scan_station_enabled: boolean
   scan_window_enabled: boolean
   window_start_time: string
@@ -85,6 +91,7 @@ const emptyForm: TaskForm = {
   custom_reset_days: 7,
   allow_scanner: true,
   allow_button_claim: false,
+  allowed_opener_roles: ['leader', 'teacher'],
   scan_station_enabled: true,
   scan_window_enabled: false,
   window_start_time: '07:00',
@@ -98,7 +105,7 @@ function normalizeRelation<T>(value: T | T[] | null | undefined): T | undefined 
 }
 
 function formatCooldown(minutes: number) {
-  if (minutes <= 0) return '無冷卻'
+  if (minutes <= 0) return '無冷卻限制'
   if (minutes < 60) return `${minutes} 分鐘`
 
   const hours = Math.floor(minutes / 60)
@@ -111,6 +118,11 @@ function scopeClassIds(task: TaskWithRelations) {
     return task.task_classes.map(item => item.class_id)
   }
   return task.class_id ? [task.class_id] : []
+}
+
+function formatOpenerRoles(roles: TaskOpenerRole[] | undefined) {
+  const values: TaskOpenerRole[] = roles?.length ? roles : ['leader', 'teacher']
+  return values.map(role => OPENER_ROLE_LABELS[role]).join('、')
 }
 
 function mapTaskToForm(task: TaskWithRelations, currentUserRole?: string, currentUserClassId?: string | null): TaskForm {
@@ -127,6 +139,7 @@ function mapTaskToForm(task: TaskWithRelations, currentUserRole?: string, curren
     custom_reset_days: task.custom_reset_days ?? 7,
     allow_scanner: task.allow_scanner,
     allow_button_claim: task.allow_button_claim,
+    allowed_opener_roles: task.allowed_opener_roles?.length ? task.allowed_opener_roles : ['leader', 'teacher'],
     scan_station_enabled: task.scan_station_enabled,
     scan_window_enabled: task.scan_window_enabled,
     window_start_time: task.window_start_time?.slice(0, 5) ?? '07:00',
@@ -164,6 +177,10 @@ export default function TeacherTasksPage() {
     [editingTaskId, tasks]
   )
 
+  const availableClasses = user?.role === 'leader'
+    ? classes.filter(item => item.id === user.class_id)
+    : classes
+
   useEffect(() => {
     void Promise.all([loadTasks(), loadClasses()])
   }, [])
@@ -182,11 +199,10 @@ export default function TeacherTasksPage() {
 
   useEffect(() => {
     if (user?.role === 'leader' && user.class_id) {
-      const leaderClassId = user.class_id
       setForm(previous => ({
         ...previous,
         scope_type: 'class',
-        selected_class_ids: [leaderClassId]
+        selected_class_ids: user.class_id ? [user.class_id] : []
       }))
     }
   }, [user?.class_id, user?.role])
@@ -286,6 +302,18 @@ export default function TeacherTasksPage() {
     })
   }
 
+  const toggleOpenerRoleSelection = (role: TaskOpenerRole) => {
+    setForm(previous => {
+      const exists = previous.allowed_opener_roles.includes(role)
+      return {
+        ...previous,
+        allowed_opener_roles: exists
+          ? previous.allowed_opener_roles.filter(item => item !== role)
+          : [...previous.allowed_opener_roles, role]
+      }
+    })
+  }
+
   const buildTaskPayload = () => {
     const selectedClassIds =
       user?.role === 'leader' && user.class_id
@@ -307,6 +335,7 @@ export default function TeacherTasksPage() {
         claim_cooldown_minutes: Number(form.claim_cooldown_minutes),
         allow_scanner: form.allow_scanner,
         allow_button_claim: form.allow_button_claim,
+        allowed_opener_roles: form.allowed_opener_roles,
         scan_station_enabled: form.allow_scanner ? form.scan_station_enabled : false,
         code_format: 'qr',
         is_active: form.is_active,
@@ -336,7 +365,12 @@ export default function TeacherTasksPage() {
     if (!user) return
 
     if (!form.allow_scanner && !form.allow_button_claim) {
-      setError('至少要選擇一種任務完成方式。')
+      setError('請至少選擇一種任務完成方式。')
+      return
+    }
+
+    if (form.allow_scanner && form.allowed_opener_roles.length === 0) {
+      setError('請至少選擇一種可開啟任務的角色。')
       return
     }
 
@@ -350,7 +384,7 @@ export default function TeacherTasksPage() {
           : []
 
     if (effectiveScope === 'class' && effectiveClassIds.length === 0) {
-      setError('班級任務至少要選擇一個班級。')
+      setError('班級任務至少要指定一個班級。')
       return
     }
 
@@ -401,7 +435,7 @@ export default function TeacherTasksPage() {
 
         await saveTaskScope(editingTaskId, effectiveScope, effectiveClassIds)
 
-        setMessage(`已儲存任務：${form.title.trim()}`)
+        setMessage(`已更新任務：${form.title.trim()}`)
         await loadTasks()
         setEditingTaskId(null)
         setForm(isLeader && user.class_id
@@ -434,7 +468,7 @@ export default function TeacherTasksPage() {
   }
 
   const softDeleteTask = async (task: TaskWithRelations) => {
-    const confirmed = window.confirm(`確定要刪除任務「${task.title}」嗎？\n\n任務會被停用，既有紀錄會保留。`)
+    const confirmed = window.confirm(`確定要停用任務「${task.title}」嗎？\n\n既有完成紀錄會保留，但學生端將不再顯示。`)
     if (!confirmed) return
 
     setError(null)
@@ -474,16 +508,12 @@ export default function TeacherTasksPage() {
     )
   }
 
-  const availableClasses = user?.role === 'leader'
-    ? classes.filter(item => item.id === user.class_id)
-    : classes
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">任務管理</h1>
-          <p className="text-sm text-slate-400">建立任務、設定適用範圍、列印條碼與查看完成紀錄。</p>
+          <p className="text-sm text-slate-400">建立任務、設定條碼、決定誰可以開通任務，並查看發點紀錄。</p>
         </div>
         <Link
           to="/scan"
@@ -545,7 +575,7 @@ export default function TeacherTasksPage() {
                   onChange={() => setForm({ ...form, scope_type: 'school', selected_class_ids: [] })}
                   className="accent-indigo-500"
                 />
-                全校性任務
+                全校任務
               </label>
               <label className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-sm text-slate-300">
                 <input
@@ -564,13 +594,13 @@ export default function TeacherTasksPage() {
               </label>
             </div>
             {user?.role === 'leader' ? (
-              <p className="mt-1 text-xs text-slate-500">幹部只能建立自己班級的任務。</p>
+              <p className="mt-1 text-xs text-slate-500">幹部建立的任務固定為自己班級的任務。</p>
             ) : null}
           </div>
 
           {(user?.role === 'leader' || form.scope_type === 'class') ? (
             <div className="space-y-2 sm:col-span-2">
-              <label className="block text-sm text-slate-400">適用班級{user?.role !== 'leader' ? '（可複選）' : ''}</label>
+              <label className="block text-sm text-slate-400">指定班級{user?.role !== 'leader' ? '（可複選）' : ''}</label>
               <div className="grid gap-2 sm:grid-cols-3">
                 {availableClasses.map(item => {
                   const checked = form.selected_class_ids.includes(item.id) || (user?.role === 'leader' && user.class_id === item.id)
@@ -632,7 +662,7 @@ export default function TeacherTasksPage() {
               onChange={event => setForm({ ...form, claim_cooldown_minutes: Number(event.target.value) })}
               className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
             />
-            <p className="mt-1 text-xs text-slate-500">填 0 代表沒有冷卻時間。</p>
+            <p className="mt-1 text-xs text-slate-500">填 0 代表不限冷卻時間。</p>
           </div>
 
           {form.recurrence_type === 'custom' ? (
@@ -681,6 +711,34 @@ export default function TeacherTasksPage() {
               </label>
             </div>
           </div>
+
+          {form.allow_scanner ? (
+            <div className="space-y-2 sm:col-span-2">
+              <label className="block text-sm text-slate-400">可開啟 / 關閉任務的角色</label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(['leader', 'teacher'] as TaskOpenerRole[]).map(role => {
+                  const checked = form.allowed_opener_roles.includes(role)
+                  return (
+                    <label
+                      key={role}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                        checked ? 'border-indigo-500 bg-indigo-600/20 text-white' : 'border-slate-600 bg-slate-700/50 text-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleOpenerRoleSelection(role)}
+                        className="accent-indigo-500"
+                      />
+                      {OPENER_ROLE_LABELS[role]}
+                    </label>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-slate-500">管理者保有最高權限，會一併允許開啟與關閉任務。</p>
+            </div>
+          ) : null}
 
           <label className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-sm text-slate-300">
             <input
@@ -755,9 +813,12 @@ export default function TeacherTasksPage() {
                       ? ` · ${task.window_start_time.slice(0, 5)}-${task.window_end_time.slice(0, 5)}`
                       : ''}
                   </p>
+                  {task.allow_scanner ? (
+                    <p className="mt-1 text-xs text-amber-300">可開通角色：{formatOpenerRoles(task.allowed_opener_roles)}</p>
+                  ) : null}
                   {task.scope_type === 'class' ? (
                     <p className="mt-1 text-xs text-indigo-300">
-                      適用班級：{classNames.length > 0 ? classNames.join('、') : '未指定'}
+                      指定班級：{classNames.length > 0 ? classNames.join('、') : '未設定'}
                     </p>
                   ) : (
                     <p className="mt-1 text-xs text-emerald-300">適用範圍：全校</p>
@@ -780,7 +841,8 @@ export default function TeacherTasksPage() {
                 metaLines={[
                   `任務：${task.title}`,
                   `範圍：${task.scope_type === 'school' ? '全校' : classNames.join('、') || '班級任務'}`,
-                  `點數：${task.points}`
+                  `點數：${task.points}`,
+                  `可開通角色：${formatOpenerRoles(task.allowed_opener_roles)}`
                 ]}
               />
 
@@ -830,7 +892,7 @@ export default function TeacherTasksPage() {
       {selectedTask ? (
         <div className="rounded-lg bg-slate-800 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="font-semibold">{selectedTask.title} 完成紀錄</h2>
+            <h2 className="font-semibold">{selectedTask.title} 發點紀錄</h2>
             <button
               onClick={exportRecords}
               className="flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
@@ -851,12 +913,12 @@ export default function TeacherTasksPage() {
                   <div>
                     <p className="font-medium text-slate-200">{row.user?.name ?? '未知學生'}</p>
                     <p className="text-xs text-slate-500">
-                      {row.user?.student_id ?? row.user?.student_no ?? '無學號'} · 週期 {row.period_key ?? 'once'}
+                      {row.user?.student_id ?? row.user?.student_no ?? '-'} · 週期 {row.period_key ?? 'once'}
                     </p>
                   </div>
                   <div className="text-xs text-slate-400">
                     <p>{new Date(row.completed_at).toLocaleString('zh-TW')}</p>
-                    <p>核發者：{row.awarded_by_profile?.name ?? '系統'}</p>
+                    <p>發點者：{row.awarded_by_profile?.name ?? '系統'}</p>
                   </div>
                 </div>
               ))}
