@@ -9,6 +9,23 @@ import type { Class, Profile, Role, StudentRoster } from '../types'
 
 type EditableStudent = StudentRoster
 type RegisteredProfile = Profile
+type UnifiedStudent = {
+  id: string
+  source: 'roster' | 'profile'
+  auth_user_id: string | null
+  profile_id: string | null
+  name: string
+  student_no: string
+  seat_no: number | null
+  email: string | null
+  role: Exclude<Role, 'teacher' | 'admin'>
+  title: string | null
+  class_id: string | null
+  scan_code: string
+  points: number
+  created_by: string
+  created_at: string
+}
 
 const emptyStudentForm = {
   name: '',
@@ -28,7 +45,7 @@ export default function TeacherStudentsPage() {
   const [classes, setClasses] = useState<Class[]>([])
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [draft, setDraft] = useState<EditableStudent | null>(null)
+  const [draft, setDraft] = useState<UnifiedStudent | null>(null)
   const [selectedRegisteredId, setSelectedRegisteredId] = useState<string | null>(null)
   const [registeredDraft, setRegisteredDraft] = useState<RegisteredProfile | null>(null)
   const [studentForm, setStudentForm] = useState(emptyStudentForm)
@@ -40,30 +57,92 @@ export default function TeacherStudentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
+  const classedRegisteredProfiles = useMemo(() => {
+    const linkedProfileIds = new Set(
+      students
+        .map(student => student.auth_user_id)
+        .filter((value): value is string => Boolean(value))
+    )
+
+    return registeredProfiles.filter(profile => {
+      if (profile.id === user?.id) return false
+      if (linkedProfileIds.has(profile.id)) return false
+      if (!profile.class_id) return false
+      return profile.role === 'student' || profile.role === 'leader'
+    })
+  }, [registeredProfiles, students, user?.id])
+
+  const studentDirectory = useMemo<UnifiedStudent[]>(() => {
+    const rosterStudents: UnifiedStudent[] = students.map(student => ({
+      id: `roster:${student.id}`,
+      source: 'roster',
+      auth_user_id: student.auth_user_id,
+      profile_id: student.auth_user_id,
+      name: student.name,
+      student_no: student.student_no,
+      seat_no: student.seat_no,
+      email: student.email,
+      role: student.role,
+      title: student.title,
+      class_id: student.class_id,
+      scan_code: student.scan_code,
+      points: student.points,
+      created_by: student.created_by,
+      created_at: student.created_at
+    }))
+
+    const registeredStudents: UnifiedStudent[] = classedRegisteredProfiles.map(profile => ({
+      id: `profile:${profile.id}`,
+      source: 'profile',
+      auth_user_id: profile.id,
+      profile_id: profile.id,
+      name: profile.name,
+      student_no: profile.student_id ?? '',
+      seat_no: null,
+      email: profile.email,
+      role: profile.role === 'leader' ? 'leader' : 'student',
+      title: profile.title,
+      class_id: profile.class_id,
+      scan_code: profile.scan_code ?? '',
+      points: profile.stars,
+      created_by: '',
+      created_at: profile.created_at
+    }))
+
+    return [...rosterStudents, ...registeredStudents].sort((left, right) => {
+      const classNameLeft = classes.find(item => item.id === left.class_id)?.name ?? ''
+      const classNameRight = classes.find(item => item.id === right.class_id)?.name ?? ''
+      if (classNameLeft !== classNameRight) return classNameLeft.localeCompare(classNameRight, 'zh-Hant')
+      const seatDiff = (left.seat_no ?? 999) - (right.seat_no ?? 999)
+      if (seatDiff !== 0) return seatDiff
+      return left.name.localeCompare(right.name, 'zh-Hant')
+    })
+  }, [classedRegisteredProfiles, classes, students])
+
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase()
-    return students.filter(student => {
+    return studentDirectory.filter(student => {
       if (!keyword) return true
       const className = classes.find(item => item.id === student.class_id)?.name ?? ''
       const text = `${student.name} ${student.student_no} ${student.seat_no ?? ''} ${student.email ?? ''} ${student.title ?? ''} ${className}`.toLowerCase()
       return text.includes(keyword)
     })
-  }, [classes, query, students])
+  }, [classes, query, studentDirectory])
 
   const selected = useMemo(
-    () => students.find(student => student.id === selectedId) ?? students[0] ?? null,
-    [selectedId, students]
+    () => studentDirectory.find(student => student.id === selectedId) ?? studentDirectory[0] ?? null,
+    [selectedId, studentDirectory]
   )
 
   const printableStudents = useMemo(() => {
-    return students
+    return studentDirectory
       .filter(student => student.class_id === printClassId)
       .sort((left, right) => {
         const seatDiff = (left.seat_no ?? 999) - (right.seat_no ?? 999)
         if (seatDiff !== 0) return seatDiff
         return left.student_no.localeCompare(right.student_no)
       })
-  }, [printClassId, students])
+  }, [printClassId, studentDirectory])
 
   const pendingRegisteredProfiles = useMemo(() => {
     const linkedProfileIds = new Set(
@@ -81,23 +160,9 @@ export default function TeacherStudentsPage() {
     })
   }, [registeredProfiles, students, user?.id])
 
-  const registeredStudentProfiles = useMemo(() => {
-    const linkedProfileIds = new Set(
-      students
-        .map(student => student.auth_user_id)
-        .filter((value): value is string => Boolean(value))
-    )
-
-    return registeredProfiles.filter(profile => {
-      if (profile.id === user?.id) return false
-      if (linkedProfileIds.has(profile.id)) return false
-      return profile.role === 'student' || profile.role === 'leader'
-    })
-  }, [registeredProfiles, students, user?.id])
-
   const selectedRegisteredProfile = useMemo(
-    () => registeredStudentProfiles.find(profile => profile.id === selectedRegisteredId) ?? registeredStudentProfiles[0] ?? null,
-    [registeredStudentProfiles, selectedRegisteredId]
+    () => pendingRegisteredProfiles.find(profile => profile.id === selectedRegisteredId) ?? pendingRegisteredProfiles[0] ?? null,
+    [pendingRegisteredProfiles, selectedRegisteredId]
   )
 
   useEffect(() => {
@@ -260,24 +325,46 @@ export default function TeacherStudentsPage() {
     setError(null)
     setMessage(null)
 
-    const { error } = await supabase
-      .from('student_rosters')
-      .update({
-        name: draft.name.trim(),
-        student_no: draft.student_no.trim(),
-        seat_no: draft.seat_no ? Number(draft.seat_no) : null,
-        email: draft.email?.trim() || null,
-        role: draft.role,
-        title: draft.title?.trim() || null,
-        class_id: draft.class_id || null
-      })
-      .eq('id', draft.id)
+    if (draft.source === 'profile' && draft.profile_id) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          name: draft.name.trim(),
+          student_id: draft.student_no.trim() || null,
+          email: draft.email?.trim() || null,
+          role: draft.role,
+          title: draft.title?.trim() || null,
+          class_id: draft.class_id || null
+        })
+        .eq('id', draft.profile_id)
 
-    if (error) {
-      setError(error.message)
+      if (error) {
+        setError(error.message)
+      } else {
+        setMessage('已儲存已註冊學生資料。')
+        await loadRegisteredProfiles()
+      }
     } else {
-      setMessage('已儲存學生資料。')
-      await loadStudents()
+      const rosterId = draft.id.replace('roster:', '')
+      const { error } = await supabase
+        .from('student_rosters')
+        .update({
+          name: draft.name.trim(),
+          student_no: draft.student_no.trim(),
+          seat_no: draft.seat_no ? Number(draft.seat_no) : null,
+          email: draft.email?.trim() || null,
+          role: draft.role,
+          title: draft.title?.trim() || null,
+          class_id: draft.class_id || null
+        })
+        .eq('id', rosterId)
+
+      if (error) {
+        setError(error.message)
+      } else {
+        setMessage('已儲存學生資料。')
+        await loadStudents()
+      }
     }
 
     setSaving(false)
@@ -290,15 +377,33 @@ export default function TeacherStudentsPage() {
     setError(null)
     setMessage(null)
 
-    const scanCode = createScanCode('STU')
-    const { error } = await supabase.from('student_rosters').update({ scan_code: scanCode }).eq('id', draft.id)
+    if (draft.source === 'profile' && draft.profile_id) {
+      const { data, error } = await supabase.rpc('reset_profile_scan_code', {
+        p_profile_id: draft.profile_id
+      })
 
-    if (error) {
-      setError(error.message)
+      if (error) {
+        setError(error.message)
+      } else {
+        const nextCode = data?.[0]?.scan_code as string | undefined
+        if (nextCode) {
+          setDraft({ ...draft, scan_code: nextCode })
+        }
+        setMessage('已重設身分條碼，舊條碼立即失效。')
+        await loadRegisteredProfiles()
+      }
     } else {
-      setDraft({ ...draft, scan_code: scanCode })
-      setMessage('已重設身分條碼，舊條碼立即失效。')
-      await loadStudents()
+      const scanCode = createScanCode('STU')
+      const rosterId = draft.id.replace('roster:', '')
+      const { error } = await supabase.from('student_rosters').update({ scan_code: scanCode }).eq('id', rosterId)
+
+      if (error) {
+        setError(error.message)
+      } else {
+        setDraft({ ...draft, scan_code: scanCode })
+        setMessage('已重設身分條碼，舊條碼立即失效。')
+        await loadStudents()
+      }
     }
 
     setSaving(false)
@@ -306,6 +411,10 @@ export default function TeacherStudentsPage() {
 
   const provisionDraftAccount = async () => {
     if (!draft) return
+    if (draft.source === 'profile') {
+      setError('這個學生已經是註冊帳號，不需要在這裡建立登入帳號。')
+      return
+    }
     if (draftPassword.trim().length < 6) {
       setError('請輸入至少 6 個字元的初始密碼。')
       return
@@ -316,7 +425,8 @@ export default function TeacherStudentsPage() {
     setMessage(null)
 
     try {
-      const result = await createManagedStudentAccount(draft.id, draftPassword.trim())
+      const rosterId = draft.id.replace('roster:', '')
+      const result = await createManagedStudentAccount(rosterId, draftPassword.trim())
       setDraftPassword('')
       setMessage(`${result.message} 登入帳號：${result.email}`)
       await loadStudents()
@@ -469,7 +579,7 @@ export default function TeacherStudentsPage() {
   const exportStudents = () => {
     downloadCsv(
       'student-roster.csv',
-      students.map(student => ({
+      studentDirectory.map(student => ({
         student_no: student.student_no,
         name: student.name,
         class: classes.find(item => item.id === student.class_id)?.name ?? '',
@@ -478,7 +588,8 @@ export default function TeacherStudentsPage() {
         title: student.title,
         email: student.email,
         scan_code: student.scan_code,
-        points: student.points
+        points: student.points,
+        source: student.source === 'profile' ? '註冊帳號' : '學生名冊'
       }))
     )
   }
@@ -714,7 +825,11 @@ export default function TeacherStudentsPage() {
                   {ROLE_LABELS[student.role]} · {student.points} 點
                 </span>
                 <p className="mt-1 text-[11px] text-slate-500">
-                  {student.auth_user_id ? '已建立登入帳號' : '尚未建立登入帳號'}
+                  {student.source === 'profile'
+                    ? '已註冊帳號'
+                    : student.auth_user_id
+                      ? '已建立登入帳號'
+                      : '尚未建立登入帳號'}
                 </p>
               </button>
             ))
@@ -816,15 +931,19 @@ export default function TeacherStudentsPage() {
                   <div>
                     <h3 className="text-sm font-semibold text-white">學生登入帳號</h3>
                     <p className="mt-1 text-xs text-slate-400">
-                      {draft.auth_user_id
+                      {draft.source === 'profile'
+                        ? '這位學生本身就是已註冊帳號，登入帳號由學生自己管理。'
+                        : draft.auth_user_id
                         ? '這位學生已經有登入帳號，可以在這裡重設初始密碼。'
                         : '這位學生目前只有名冊資料，還沒有可登入的帳號。'}
                     </p>
                   </div>
                   <span className={`rounded-full px-3 py-1 text-xs font-medium ${
-                    draft.auth_user_id ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'
+                    draft.source === 'profile' || draft.auth_user_id
+                      ? 'bg-emerald-500/10 text-emerald-300'
+                      : 'bg-amber-500/10 text-amber-300'
                   }`}>
-                    {draft.auth_user_id ? '已開通登入' : '尚未開通'}
+                    {draft.source === 'profile' || draft.auth_user_id ? '已開通登入' : '尚未開通'}
                   </span>
                 </div>
 
@@ -833,19 +952,32 @@ export default function TeacherStudentsPage() {
                     type="password"
                     value={draftPassword}
                     onChange={event => setDraftPassword(event.target.value)}
-                    placeholder={draft.auth_user_id ? '輸入新密碼（至少 6 碼）' : '輸入初始密碼（至少 6 碼）'}
+                    placeholder={
+                      draft.source === 'profile'
+                        ? '已註冊帳號不在此頁重設密碼'
+                        : draft.auth_user_id
+                          ? '輸入新密碼（至少 6 碼）'
+                          : '輸入初始密碼（至少 6 碼）'
+                    }
+                    disabled={draft.source === 'profile'}
                     className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
                   />
                   <button
                     onClick={provisionDraftAccount}
-                    disabled={saving || draftPassword.trim().length < 6}
+                    disabled={saving || draft.source === 'profile' || draftPassword.trim().length < 6}
                     className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
                   >
-                    {draft.auth_user_id ? '重設登入密碼' : '建立登入帳號'}
+                    {draft.source === 'profile'
+                      ? '已註冊帳號'
+                      : draft.auth_user_id
+                        ? '重設登入密碼'
+                        : '建立登入帳號'}
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-slate-500">
-                  建立完成後，學生可以用 Email、姓名或身分條碼搭配密碼登入。
+                  {draft.source === 'profile'
+                    ? '這位學生已經能用自己的 Email、姓名或身分條碼搭配密碼登入。'
+                    : '建立完成後，學生可以用 Email、姓名或身分條碼搭配密碼登入。'}
                 </p>
               </div>
             </div>
@@ -872,14 +1004,14 @@ export default function TeacherStudentsPage() {
           </p>
         </div>
 
-        {registeredStudentProfiles.length === 0 ? (
+        {pendingRegisteredProfiles.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 px-4 py-8 text-center text-sm text-slate-500">
-            目前沒有可管理的已註冊學生帳號。
+            目前沒有待歸類的自主註冊帳號。
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
             <div className="max-h-[420px] space-y-2 overflow-y-auto rounded-lg bg-slate-900/30 p-3">
-              {registeredStudentProfiles.map(profile => (
+              {pendingRegisteredProfiles.map(profile => (
                 <button
                   key={profile.id}
                   type="button"
@@ -888,20 +1020,9 @@ export default function TeacherStudentsPage() {
                     registeredDraft?.id === profile.id ? 'border-indigo-500 bg-indigo-600/20' : 'border-transparent bg-slate-700/40 hover:bg-slate-700'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-white">{profile.name}</p>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] ${
-                        pendingRegisteredProfiles.some(item => item.id === profile.id)
-                          ? 'bg-amber-500/10 text-amber-300'
-                          : 'bg-emerald-500/10 text-emerald-300'
-                      }`}
-                    >
-                      {classes.find(item => item.id === profile.class_id)?.name ?? '待分班'}
-                    </span>
-                  </div>
+                  <p className="text-sm font-medium text-white">{profile.name}</p>
                   <p className="mt-1 text-xs text-slate-400">{profile.email}</p>
-                  <p className="mt-1 text-[11px] text-indigo-300">{profile.scan_code ?? '尚未產生身分碼'}</p>
+                  <p className="mt-1 text-[11px] text-amber-300">{profile.scan_code ?? '尚未產生身分碼'}</p>
                 </button>
               ))}
             </div>
