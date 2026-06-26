@@ -2,26 +2,24 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertCircle, RefreshCcw, ScanLine, Sparkles, UserRoundCheck } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useAuthStore } from '../stores/authStore'
-import type { Task } from '../types'
 
 type ScanKioskProps = {
   publicMode?: boolean
 }
 
-type ActiveTask = Pick<
-  Task,
-  | 'id'
-  | 'title'
-  | 'description'
-  | 'points'
-  | 'task_code'
-  | 'recurrence_type'
-  | 'scan_station_enabled'
-  | 'scan_window_enabled'
-  | 'window_start_time'
-  | 'window_end_time'
->
+type ActiveTask = {
+  task_id: string
+  title: string
+  description: string | null
+  points: number
+  task_code: string
+  recurrence_type: string
+  scan_station_enabled: boolean
+  scan_window_enabled: boolean
+  window_start_time: string | null
+  window_end_time: string | null
+  activation_source: 'auto' | 'session'
+}
 
 type ClaimLog = {
   id: string
@@ -39,6 +37,17 @@ type PublicClaimResult = {
   task_title: string
   points_awarded: number
   period_key: string
+  message: string
+}
+
+type ToggleTaskSessionResult = {
+  action: 'opened' | 'closed'
+  session_id: string
+  task_id: string
+  task_title: string
+  operator_id: string
+  operator_name: string
+  operator_role: 'leader' | 'teacher' | 'admin'
   message: string
 }
 
@@ -61,12 +70,6 @@ function isTaskOpenNow(task: Pick<ActiveTask, 'scan_window_enabled' | 'window_st
   return localTime >= start || localTime <= end
 }
 
-function classifyFailureMessage(message: string) {
-  if (message.includes('本週期已達領取上限')) return 'limit'
-  if (message.includes('目前不在可掃碼時間內') || message.includes('目前不在任務開放時間內')) return 'window'
-  return 'other'
-}
-
 function normalizeScannedCode(value: string) {
   return value.trim().replace(/\s+/g, '').toUpperCase()
 }
@@ -79,45 +82,58 @@ function isFunctionCode(value: string) {
   return value.startsWith('FNC')
 }
 
-function isLikelyStudentCode(value: string) {
-  return value.startsWith('STU') || value.startsWith('USR')
+function summarizeFailures(messages: string[]) {
+  const limitCount = messages.filter(message => message.includes('本週期已達領取上限')).length
+  const windowCount = messages.filter(message => message.includes('目前不在可掃描時間內') || message.includes('目前不在任務開放時間內')).length
+  const cooldownCount = messages.filter(message => message.includes('冷卻')).length
+  const others = messages.filter(message => {
+    return !message.includes('本週期已達領取上限')
+      && !message.includes('目前不在可掃描時間內')
+      && !message.includes('目前不在任務開放時間內')
+      && !message.includes('冷卻')
+  })
+
+  const parts: string[] = []
+  if (limitCount > 0) parts.push(`有 ${limitCount} 項任務已達領取上限。`)
+  if (windowCount > 0) parts.push(`有 ${windowCount} 項任務目前不在開放時間內。`)
+  if (cooldownCount > 0) parts.push(`有 ${cooldownCount} 項任務仍在冷卻時間。`)
+  parts.push(...others)
+  return parts.join('\n')
 }
 
 export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
   const navigate = useNavigate()
-  const { user } = useAuthStore()
   const hiddenInputRef = useRef<HTMLInputElement>(null)
   const bufferRef = useRef('')
   const lastKeyAtRef = useRef(0)
-  const [autoActiveTasks, setAutoActiveTasks] = useState<ActiveTask[]>([])
-  const [manualTasks, setManualTasks] = useState<ActiveTask[]>([])
+  const [activeTaskRows, setActiveTaskRows] = useState<ActiveTask[]>([])
+  const [pendingTaskCode, setPendingTaskCode] = useState<string | null>(null)
+  const [pendingTaskTitle, setPendingTaskTitle] = useState<string | null>(null)
   const [lastScannedCode, setLastScannedCode] = useState('')
-  const [message, setMessage] = useState<string | null>('待命中，直接掃任務條碼即可開啟或關閉任務。')
+  const [message, setMessage] = useState<string | null>('掃描器待命中，請先掃描任務條碼或學生身分條碼。')
   const [error, setError] = useState<string | null>(null)
   const [logs, setLogs] = useState<ClaimLog[]>([])
   const [busy, setBusy] = useState(false)
 
-  const activeTasks = useMemo(() => {
-    const mapped = new Map<string, ActiveTask>()
-    for (const task of [...autoActiveTasks, ...manualTasks]) {
-      if (task.task_code && isTaskOpenNow(task)) mapped.set(task.task_code, task)
-    }
-    return [...mapped.values()]
-  }, [autoActiveTasks, manualTasks])
+  const activeTasks = useMemo(
+    () => activeTaskRows.filter(task => task.task_code && isTaskOpenNow(task)),
+    [activeTaskRows]
+  )
 
   useEffect(() => {
     hiddenInputRef.current?.focus()
   }, [])
 
   useEffect(() => {
-    void loadAutoActiveTasks()
+    void loadActiveTasks()
   }, [])
 
   useEffect(() => {
     const refocus = () => {
       hiddenInputRef.current?.focus()
-      void loadAutoActiveTasks()
+      void loadActiveTasks()
     }
+
     window.addEventListener('click', refocus)
     window.addEventListener('focus', refocus)
     return () => {
@@ -157,95 +173,49 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [busy, publicMode, user?.id])
+  }, [busy, pendingTaskCode, activeTasks.length])
 
-  const loadAutoActiveTasks = async () => {
-    const { data, error } = await supabase
-      .from('tasks')
-      .select(
-        'id, title, description, points, task_code, recurrence_type, scan_station_enabled, scan_window_enabled, window_start_time, window_end_time, allow_scanner, is_active'
-      )
-      .eq('is_active', true)
-      .eq('allow_scanner', true)
-      .eq('scan_station_enabled', true)
-      .order('created_at', { ascending: false })
-
+  const loadActiveTasks = async () => {
+    const { data, error } = await supabase.rpc('list_active_scan_tasks')
     if (error) return
-
-    const rows = ((data ?? []) as (Task & { allow_scanner: boolean })[])
-      .filter(task => task.task_code)
-      .map(task => ({
-        id: task.id,
-        title: task.title,
-        description: task.description,
-        points: task.points,
-        task_code: task.task_code,
-        recurrence_type: task.recurrence_type,
-        scan_station_enabled: task.scan_station_enabled,
-        scan_window_enabled: task.scan_window_enabled,
-        window_start_time: task.window_start_time,
-        window_end_time: task.window_end_time
-      } satisfies ActiveTask))
-
-    setAutoActiveTasks(rows)
+    setActiveTaskRows((data ?? []) as ActiveTask[])
   }
 
-  const fetchTaskByCode = async (taskCode: string) => {
-    const { data, error } = await supabase
-      .from('tasks')
-      .select(
-        'id, title, description, points, task_code, recurrence_type, scan_station_enabled, scan_window_enabled, window_start_time, window_end_time, allow_scanner, is_active'
-      )
-      .eq('task_code', taskCode)
-      .eq('is_active', true)
-      .maybeSingle()
-
-    if (error) throw new Error(error.message)
-    if (!data) throw new Error('找不到任務條碼，或任務目前未啟用。')
-    if (!data.allow_scanner) throw new Error('這個任務目前不允許掃碼完成。')
-
-    const task = data as Task & { allow_scanner: boolean }
-    return {
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      points: task.points,
-      task_code: task.task_code,
-      recurrence_type: task.recurrence_type,
-      scan_station_enabled: task.scan_station_enabled,
-      scan_window_enabled: task.scan_window_enabled,
-      window_start_time: task.window_start_time,
-      window_end_time: task.window_end_time
-    } satisfies ActiveTask
-  }
-
-  const toggleTask = async (taskCode: string) => {
-    const task = await fetchTaskByCode(taskCode)
-
-    if (!isTaskOpenNow(task)) {
-      throw new Error(
-        `任務「${task.title}」目前不在開放時間 ${task.window_start_time?.slice(0, 5)}-${task.window_end_time?.slice(0, 5)}，暫時不會列入進行中任務。`
-      )
-    }
-
-    if (task.scan_station_enabled) {
-      await loadAutoActiveTasks()
-      setMessage(`任務「${task.title}」已設定為自動開啟，工作站會直接把它當成進行中的任務。`)
-      setError(null)
-      return
-    }
-
-    const existing = manualTasks.find(item => item.task_code === taskCode)
-    if (existing) {
-      setManualTasks(previous => previous.filter(item => item.task_code !== taskCode))
-      setMessage(`已關閉任務：${existing.title}`)
-      setError(null)
-      return
-    }
-
-    setManualTasks(previous => [task, ...previous.filter(item => item.task_code !== task.task_code)])
-    setMessage(`已開啟任務：${task.title}`)
+  const beginPendingTask = (taskCode: string) => {
+    const task = activeTaskRows.find(item => item.task_code === taskCode)
+    setPendingTaskCode(taskCode)
+    setPendingTaskTitle(task?.title ?? null)
     setError(null)
+    setMessage(`已掃描任務條碼 ${taskCode}，請再掃描操作者身分條碼確認開啟或關閉。`)
+  }
+
+  const clearPendingTask = (nextMessage?: string) => {
+    setPendingTaskCode(null)
+    setPendingTaskTitle(null)
+    if (nextMessage) {
+      setMessage(nextMessage)
+    }
+  }
+
+  const toggleTaskSession = async (taskCode: string, operatorCode: string) => {
+    const { data, error } = await supabase.rpc('toggle_task_session_by_scan', {
+      p_task_code: taskCode,
+      p_operator_scan_code: operatorCode
+    })
+
+    if (error) {
+      throw new Error(error.message)
+    }
+
+    const result = data?.[0] as ToggleTaskSessionResult | undefined
+    if (!result) {
+      throw new Error('任務開關沒有回傳結果。')
+    }
+
+    await loadActiveTasks()
+    clearPendingTask()
+    setError(null)
+    setMessage(result.message)
   }
 
   const claimTask = async (task: ActiveTask, studentCode: string) => {
@@ -260,7 +230,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
     const result = data?.[0] as PublicClaimResult | undefined
     if (!result) {
-      throw new Error(`任務 ${task.title} 沒有回傳核發結果。`)
+      throw new Error(`任務 ${task.title} 沒有回傳領取結果。`)
     }
 
     return result
@@ -268,35 +238,25 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
   const claimAcrossActiveTasks = async (studentCode: string) => {
     if (activeTasks.length === 0) {
-      throw new Error(
-        `目前沒有進行中的任務。你剛掃到的是學生身分條碼 ${studentCode}，請先掃任務條碼（TSK 開頭）或開啟自動進行中的任務。`
-      )
+      throw new Error('目前沒有進行中的任務，請先掃任務條碼，或啟用「掃描發點中自動開啟」的任務。')
     }
 
     const settled = await Promise.allSettled(activeTasks.map(task => claimTask(task, studentCode)))
     const successes = settled
       .filter((item): item is PromiseFulfilledResult<PublicClaimResult> => item.status === 'fulfilled')
       .map(item => item.value)
-
     const failures = settled
       .filter((item): item is PromiseRejectedResult => item.status === 'rejected')
       .map(item => item.reason instanceof Error ? item.reason.message : String(item.reason))
 
     if (successes.length === 0) {
-      throw new Error(failures[0] ?? '這次掃描沒有成功領取任何積分。')
+      throw new Error(summarizeFailures(failures) || '這次掃描沒有成功領取任何積分。')
     }
 
     const studentName = successes[0].student_name
     const totalPoints = successes.reduce((sum, item) => sum + item.points_awarded, 0)
-    const successLines = successes.map(item => `${item.task_title}任務，領取${item.points_awarded}點積分`)
-    const limitCount = failures.filter(item => classifyFailureMessage(item) === 'limit').length
-    const windowCount = failures.filter(item => classifyFailureMessage(item) === 'window').length
-    const otherFailures = failures.filter(item => classifyFailureMessage(item) === 'other')
-    const errorParts: string[] = []
-
-    if (limitCount > 0) errorParts.push(`有${limitCount}項任務已達領取上限`)
-    if (windowCount > 0) errorParts.push(`有${windowCount}項任務目前不在開放時間`)
-    if (otherFailures.length > 0) errorParts.push(...otherFailures)
+    const successLines = successes.map(item => `${item.task_title} 任務，領取 ${item.points_awarded} 點積分`)
+    const failureSummary = summarizeFailures(failures)
 
     setLogs(previous => [
       ...successes.map(item => ({
@@ -304,14 +264,15 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
         student: item.student_name,
         task: item.task_title,
         points: item.points_awarded,
-        time: new Date().toLocaleTimeString(),
+        time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
         message: item.message
       })),
       ...previous
     ].slice(0, 30))
 
-    setMessage(`${studentName}本次共領取${successes.length}項任務，合計${totalPoints}點積分。\n${successLines.join('\n')}`)
-    setError(errorParts.length === 0 ? null : errorParts.join('；'))
+    setMessage(`${studentName} 本次共完成 ${successes.length} 項任務，獲得 ${totalPoints} 點積分。\n${successLines.join('\n')}`)
+    setError(failureSummary || null)
+    await loadActiveTasks()
   }
 
   const processScannedCode = async (rawCode: string) => {
@@ -322,6 +283,20 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
     setError(null)
 
     try {
+      if (pendingTaskCode) {
+        if (isTaskCode(code)) {
+          beginPendingTask(code)
+          return
+        }
+
+        if (isFunctionCode(code)) {
+          throw new Error('任務等待驗證中，請先掃描操作者身分條碼。')
+        }
+
+        await toggleTaskSession(pendingTaskCode, code)
+        return
+      }
+
       if (isFunctionCode(code)) {
         if (publicMode) {
           throw new Error('公開掃描頁不提供功能碼操作。')
@@ -332,12 +307,8 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
       }
 
       if (isTaskCode(code)) {
-        await toggleTask(code)
+        beginPendingTask(code)
         return
-      }
-
-      if (!isLikelyStudentCode(code)) {
-        throw new Error('這不是可辨識的學生身分條碼。請掃任務條碼、功能碼，或學生身分條碼。')
       }
 
       await claimAcrossActiveTasks(code)
@@ -349,9 +320,9 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
     }
   }
 
-  const clearActiveTasks = () => {
-    setManualTasks([])
-    setMessage('已清空手動加入的任務。系統仍會保留自動開啟中的任務。')
+  const clearTaskState = async () => {
+    clearPendingTask('已清除等待中的任務掃描狀態。')
+    await loadActiveTasks()
     setError(null)
   }
 
@@ -369,7 +340,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold text-indigo-400">
               <Sparkles size={18} />
-              掃碼工作站
+              即時掃描工作區
             </div>
             <h1 className="mt-2 text-2xl font-bold">
               {publicMode ? '公開掃描領點頁面' : '掃碼發點工作站'}
@@ -381,7 +352,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
 
           {publicMode ? (
             <Link to="/auth" className="text-sm text-slate-300 no-underline hover:text-white">
-              返回登入 / 管理頁
+              前往登入
             </Link>
           ) : null}
         </div>
@@ -395,30 +366,41 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                   目前進行中的任務
                 </h2>
                 <p className="mt-1 text-sm text-slate-400">
-                  只有目前真的開放、而且允許掃碼完成的任務，才會出現在這裡。
+                  只會列出目前可掃描領點的任務；超出開放時間的任務不會顯示在這裡。
                 </p>
               </div>
 
-              {activeTasks.length > 0 ? (
+              {(activeTasks.length > 0 || pendingTaskCode) ? (
                 <button
                   type="button"
-                  onClick={clearActiveTasks}
+                  onClick={() => void clearTaskState()}
                   className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
                 >
                   <RefreshCcw size={16} />
-                  清空手動任務
+                  重新整理
                 </button>
               ) : null}
             </div>
 
+            {pendingTaskCode ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                <p className="font-semibold">等待操作者驗證</p>
+                <p className="mt-1">
+                  任務條碼：<span className="font-mono">{pendingTaskCode}</span>
+                  {pendingTaskTitle ? `（${pendingTaskTitle}）` : ''}
+                </p>
+                <p className="mt-2 text-amber-100">請再掃描小老師、幹部、教師或管理者的身分條碼。</p>
+              </div>
+            ) : null}
+
             {activeTasks.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 px-4 py-8 text-center text-sm text-slate-500">
-                目前沒有進行中的任務，請先掃任務條碼，或在任務設定中開啟自動發點。
+                目前沒有進行中的任務。可先掃任務條碼，再掃操作者身分條碼啟用任務。
               </div>
             ) : (
               <div className="space-y-3">
                 {activeTasks.map(task => (
-                  <div key={task.id} className="rounded-xl border border-slate-700 bg-slate-900/40 px-4 py-3">
+                  <div key={`${task.activation_source}-${task.task_id}`} className="rounded-xl border border-slate-700 bg-slate-900/40 px-4 py-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <p className="font-semibold text-white">{task.title}</p>
@@ -431,11 +413,10 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                     <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
                       <span>{task.recurrence_type}</span>
                       {task.scan_window_enabled && task.window_start_time && task.window_end_time ? (
-                        <span>
-                          開放時間 {task.window_start_time.slice(0, 5)}-{task.window_end_time.slice(0, 5)}
-                        </span>
+                        <span>開放時間 {task.window_start_time.slice(0, 5)}-{task.window_end_time.slice(0, 5)}</span>
                       ) : null}
                       <span className="font-mono">{task.task_code}</span>
+                      <span>{task.activation_source === 'auto' ? '自動開啟' : '任務碼開啟'}</span>
                     </div>
                   </div>
                 ))}
@@ -450,7 +431,7 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
                 掃描狀態
               </h2>
               <p className="mt-1 text-sm text-slate-400">
-                這個頁面會持續待命，不需要點輸入框，掃描器送出 Enter 後就會自動處理。
+                先掃任務條碼可切換任務，再掃操作者條碼確認；直接掃學生條碼則會對目前進行中的任務發點。
               </p>
             </div>
 
@@ -472,8 +453,9 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
             </div>
 
             <div className="rounded-xl bg-slate-900/50 px-4 py-3 text-sm text-slate-400">
-              <p>1. 掃任務條碼：加入或關閉工作站中的任務。</p>
-              <p className="mt-2">2. 掃學生身分條碼：對所有符合規則的進行中任務一次發點。</p>
+              <p>1. 掃任務條碼：進入待驗證狀態。</p>
+              <p className="mt-2">2. 再掃操作者身分條碼：確認角色後開啟或關閉該任務。</p>
+              <p className="mt-2">3. 掃學生身分條碼：對所有符合規則的進行中任務一次發點。</p>
             </div>
           </section>
         </div>
@@ -481,11 +463,11 @@ export default function ScanKiosk({ publicMode = false }: ScanKioskProps) {
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-800/80 p-5">
           <div className="flex items-center gap-2">
             <AlertCircle size={18} className="text-indigo-300" />
-            <h2 className="font-semibold">最近核發紀錄</h2>
+            <h2 className="font-semibold">最近發點紀錄</h2>
           </div>
 
           {logs.length === 0 ? (
-            <p className="py-6 text-center text-sm text-slate-500">目前還沒有新的核發紀錄。</p>
+            <p className="py-6 text-center text-sm text-slate-500">目前還沒有新的掃描成功紀錄。</p>
           ) : (
             <div className="mt-4 space-y-2">
               {logs.map(log => (
