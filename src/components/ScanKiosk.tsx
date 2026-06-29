@@ -18,6 +18,8 @@ type ActiveTask = {
   scan_window_enabled: boolean
   window_start_time: string | null
   window_end_time: string | null
+  starts_at: string | null
+  ends_at: string | null
   activation_source: 'auto' | 'session'
 }
 
@@ -53,7 +55,11 @@ type ToggleTaskSessionResult = {
 
 const SCAN_RESET_MS = 120
 
-function isTaskOpenNow(task: Pick<ActiveTask, 'scan_window_enabled' | 'window_start_time' | 'window_end_time'>) {
+function isTaskOpenNow(task: Pick<ActiveTask, 'scan_window_enabled' | 'window_start_time' | 'window_end_time' | 'starts_at' | 'ends_at'>) {
+  const now = new Date()
+  if (task.starts_at && now < new Date(task.starts_at)) return false
+  if (task.ends_at && now > new Date(task.ends_at)) return false
+
   if (!task.scan_window_enabled || !task.window_start_time || !task.window_end_time) return true
 
   const localTime = new Intl.DateTimeFormat('en-CA', {

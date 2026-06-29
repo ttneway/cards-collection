@@ -190,6 +190,7 @@ export interface Task {
   max_completions: number | null
   starts_at: string | null
   ends_at: string | null
+  archive_after_days: number
   created_at: string
   task_classes?: Array<{
     class_id: string

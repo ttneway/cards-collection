@@ -63,6 +63,9 @@ type TaskForm = {
   title: string
   description: string
   points: number
+  starts_at: string
+  ends_at: string
+  archive_after_days: number
   scope_type: TaskScopeType
   selected_class_ids: string[]
   recurrence_type: TaskRecurrenceType
@@ -83,6 +86,9 @@ const emptyForm: TaskForm = {
   title: '',
   description: '',
   points: 10,
+  starts_at: '',
+  ends_at: '',
+  archive_after_days: 7,
   scope_type: 'school',
   selected_class_ids: [],
   recurrence_type: 'daily',
@@ -131,6 +137,9 @@ function mapTaskToForm(task: TaskWithRelations, currentUserRole?: string, curren
     title: task.title,
     description: task.description ?? '',
     points: task.points,
+    starts_at: task.starts_at ? task.starts_at.slice(0, 16) : '',
+    ends_at: task.ends_at ? task.ends_at.slice(0, 16) : '',
+    archive_after_days: task.archive_after_days ?? 7,
     scope_type: currentUserRole === 'leader' ? 'class' : task.scope_type ?? (selectedClassIds.length > 0 ? 'class' : 'school'),
     selected_class_ids: currentUserRole === 'leader' && currentUserClassId ? [currentUserClassId] : selectedClassIds,
     recurrence_type: task.recurrence_type,
@@ -327,6 +336,9 @@ export default function TeacherTasksPage() {
         title: form.title.trim(),
         description: form.description.trim(),
         points: Number(form.points),
+        starts_at: form.starts_at ? new Date(form.starts_at).toISOString() : null,
+        ends_at: form.ends_at ? new Date(form.ends_at).toISOString() : null,
+        archive_after_days: Number(form.archive_after_days),
         scope_type: user?.role === 'leader' ? 'class' : form.scope_type,
         class_id: selectedClassIds[0] ?? null,
         recurrence_type: form.recurrence_type,
@@ -385,6 +397,11 @@ export default function TeacherTasksPage() {
 
     if (effectiveScope === 'class' && effectiveClassIds.length === 0) {
       setError('班級任務至少要指定一個班級。')
+      return
+    }
+
+    if (form.starts_at && form.ends_at && new Date(form.ends_at).getTime() <= new Date(form.starts_at).getTime()) {
+      setError('任務結束時間必須晚於開始時間')
       return
     }
 
@@ -562,6 +579,38 @@ export default function TeacherTasksPage() {
               required
               className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
             />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-slate-400">任務開始時間</label>
+            <input
+              type="datetime-local"
+              value={form.starts_at}
+              onChange={event => setForm({ ...form, starts_at: event.target.value })}
+              className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-slate-400">任務結束時間</label>
+            <input
+              type="datetime-local"
+              value={form.ends_at}
+              onChange={event => setForm({ ...form, ends_at: event.target.value })}
+              className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-slate-400">結束後保留顯示天數</label>
+            <input
+              type="number"
+              min="0"
+              value={form.archive_after_days}
+              onChange={event => setForm({ ...form, archive_after_days: Number(event.target.value) })}
+              className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+            />
+            <p className="mt-1 text-xs text-slate-500">任務截止後，前台還要保留顯示幾天。預設 7 天。</p>
           </div>
 
           <div className="sm:col-span-2">

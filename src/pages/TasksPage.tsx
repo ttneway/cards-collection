@@ -43,6 +43,17 @@ function taskMatchesUserClass(task: TaskWithClasses, classId: string | null) {
   return getTaskClassIds(task).includes(classId)
 }
 
+function isTaskDisplayable(task: TaskWithClasses) {
+  const now = new Date()
+
+  if (task.starts_at && now < new Date(task.starts_at)) return false
+  if (!task.ends_at) return true
+
+  const hiddenAt = new Date(task.ends_at)
+  hiddenAt.setDate(hiddenAt.getDate() + Math.max(task.archive_after_days ?? 7, 0))
+  return now <= hiddenAt
+}
+
 export default function TasksPage() {
   const { user, refreshProfile } = useAuthStore()
   const [tasks, setTasks] = useState<TaskWithClasses[]>([])
@@ -55,10 +66,10 @@ export default function TasksPage() {
     if (!user) return []
 
     if (user.role === 'teacher' || user.role === 'admin') {
-      return tasks
+      return tasks.filter(isTaskDisplayable)
     }
 
-    return tasks.filter(task => taskMatchesUserClass(task, user.class_id))
+    return tasks.filter(task => taskMatchesUserClass(task, user.class_id) && isTaskDisplayable(task))
   }, [tasks, user])
 
   useEffect(() => {
