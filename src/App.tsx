@@ -6,6 +6,7 @@ import AchievementsPage from './pages/AchievementsPage'
 import AdminPage from './pages/AdminPage'
 import CardLibraryPage from './pages/CardLibraryPage'
 import CharacterPage from './pages/CharacterPage'
+import GuidePage from './pages/GuidePage'
 import HomePage from './pages/HomePage'
 import LeaderPage from './pages/LeaderPage'
 import LoginPage from './pages/LoginPage'
@@ -113,6 +114,7 @@ export default function App() {
         <Route path="tasks" element={<TasksPage />} />
         <Route path="achievements" element={<AchievementsPage />} />
         <Route path="character" element={<CharacterPage />} />
+        <Route path="guide" element={<GuidePage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="trades" element={<TradesPage />} />
 
