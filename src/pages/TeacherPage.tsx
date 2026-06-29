@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Edit3, Library, ListChecks, Settings, Sparkles, Trophy, Users, Wand2 } from 'lucide-react'
+import { BarChart3, Edit3, Library, ListChecks, Settings, Sparkles, Trophy, Users, Wand2 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
@@ -40,6 +40,7 @@ export default function TeacherPage() {
       { icon: Library, label: '卡牌管理', desc: '建立卡牌、收集冊與展示內容', href: '/teacher/cards' },
       { icon: ListChecks, label: '任務管理', desc: '設定任務、條碼與發點規則', href: '/teacher/tasks' },
       { icon: Trophy, label: '成就管理', desc: '設定成就條件與獎勵', href: '/teacher/achievements' },
+      { icon: BarChart3, label: '統計分析', desc: '查看班級、任務與學生個人報表', href: '/teacher/analytics' },
       { icon: Users, label: '學生與條碼', desc: '管理班級、學生帳號與列印條碼', href: '/teacher/students' },
       { icon: Wand2, label: '職業管理', desc: '建立遊戲職業與被動能力參數', href: '/teacher/professions' },
       { icon: Sparkles, label: '裝備管理', desc: '建立裝備模板、商店售價與發放', href: '/teacher/equipment' },
