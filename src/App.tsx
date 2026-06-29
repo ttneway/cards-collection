@@ -21,6 +21,7 @@ import TeacherEquipmentPage from './pages/TeacherEquipmentPage'
 import TeacherPage from './pages/TeacherPage'
 import TeacherProfessionsPage from './pages/TeacherProfessionsPage'
 import TeacherAnalyticsPage from './pages/TeacherAnalyticsPage'
+import TeacherPacksPage from './pages/TeacherPacksPage'
 import TeacherStudentsPage from './pages/TeacherStudentsPage'
 import TeacherTasksPage from './pages/TeacherTasksPage'
 import TradesPage from './pages/TradesPage'
@@ -147,6 +148,15 @@ export default function App() {
           element={
             <RoleRoute roles={['teacher', 'admin']}>
               <TeacherCardsPage />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="teacher/packs"
+          element={
+            <RoleRoute roles={['teacher', 'admin']}>
+              <TeacherPacksPage />
             </RoleRoute>
           }
         />
