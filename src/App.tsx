@@ -5,6 +5,7 @@ import { useAuthStore } from './stores/authStore'
 import AchievementsPage from './pages/AchievementsPage'
 import AdminPage from './pages/AdminPage'
 import CardLibraryPage from './pages/CardLibraryPage'
+import CharacterPage from './pages/CharacterPage'
 import HomePage from './pages/HomePage'
 import LeaderPage from './pages/LeaderPage'
 import LoginPage from './pages/LoginPage'
@@ -14,20 +15,27 @@ import ScanPage from './pages/ScanPage'
 import ScanStationPage from './pages/ScanStationPage'
 import ShopPage from './pages/ShopPage'
 import TasksPage from './pages/TasksPage'
-import TeacherPage from './pages/TeacherPage'
-import TeacherCardsPage from './pages/TeacherCardsPage'
-import TeacherStudentsPage from './pages/TeacherStudentsPage'
 import TeacherAchievementsPage from './pages/TeacherAchievementsPage'
+import TeacherCardsPage from './pages/TeacherCardsPage'
+import TeacherEquipmentPage from './pages/TeacherEquipmentPage'
+import TeacherPage from './pages/TeacherPage'
+import TeacherProfessionsPage from './pages/TeacherProfessionsPage'
+import TeacherStudentsPage from './pages/TeacherStudentsPage'
 import TeacherTasksPage from './pages/TeacherTasksPage'
 import TradesPage from './pages/TradesPage'
+
+function LoadingScreen() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <p className="text-slate-400">載入中...</p>
+    </div>
+  )
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore()
 
-  if (loading) {
-    return <div className="flex min-h-[50vh] items-center justify-center"><p>載入中...</p></div>
-  }
-
+  if (loading) return <LoadingScreen />
   if (!user) return <Navigate to="/auth" replace />
   return <>{children}</>
 }
@@ -35,10 +43,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function RoleRoute({ children, roles }: { children: React.ReactNode; roles: string[] }) {
   const { user, loading, hasRole } = useAuthStore()
 
-  if (loading) {
-    return <div className="flex min-h-[50vh] items-center justify-center"><p>載入中...</p></div>
-  }
-
+  if (loading) return <LoadingScreen />
   if (!user) return <Navigate to="/auth" replace />
   if (!roles.some(role => hasRole(role as any))) return <Navigate to="/" replace />
   return <>{children}</>
@@ -54,7 +59,7 @@ export default function App() {
   if (!initialized) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-slate-900">
-        <p className="text-slate-400">載入中...</p>
+        <p className="text-slate-400">初始化中...</p>
       </div>
     )
   }
@@ -64,11 +69,12 @@ export default function App() {
       <div className="flex min-h-dvh items-center justify-center bg-slate-900 px-4">
         <div className="max-w-sm text-center">
           <p className="mb-4 text-4xl">!</p>
-          <h1 className="mb-2 text-xl font-bold text-white">系統設定尚未完成</h1>
+          <h1 className="mb-2 text-xl font-bold text-white">Supabase 設定尚未完成</h1>
           <p className="mb-4 text-sm text-slate-400">
-            Supabase 環境變數缺失。<br />
-            請在 GitHub Secrets 設定 <code className="text-indigo-400">VITE_SUPABASE_URL</code> 與{' '}
-            <code className="text-indigo-400">VITE_SUPABASE_ANON_KEY</code>。
+            請確認 GitHub Secrets 或本機環境變數已設定
+            <code className="mx-1 text-indigo-400">VITE_SUPABASE_URL</code>
+            和
+            <code className="mx-1 text-indigo-400">VITE_SUPABASE_ANON_KEY</code>。
           </p>
           <a
             href="https://github.com/ttneway/cards-collection/settings/secrets/actions"
@@ -76,7 +82,7 @@ export default function App() {
             rel="noopener noreferrer"
             className="inline-block rounded-lg bg-indigo-600 px-6 py-2 text-sm font-medium text-white no-underline hover:bg-indigo-500"
           >
-            前往設定 Secrets
+            前往 GitHub Secrets
           </a>
         </div>
       </div>
@@ -103,6 +109,10 @@ export default function App() {
         <Route path="cards/mine" element={<MyCardsPage />} />
         <Route path="cards/packs" element={<ShopPage />} />
         <Route path="tasks" element={<TasksPage />} />
+        <Route path="achievements" element={<AchievementsPage />} />
+        <Route path="character" element={<CharacterPage />} />
+        <Route path="profile" element={<ProfilePage />} />
+        <Route path="trades" element={<TradesPage />} />
 
         <Route
           path="scan"
@@ -112,10 +122,6 @@ export default function App() {
             </RoleRoute>
           }
         />
-
-        <Route path="achievements" element={<AchievementsPage />} />
-        <Route path="profile" element={<ProfilePage />} />
-        <Route path="trades" element={<TradesPage />} />
 
         <Route
           path="leader"
@@ -167,6 +173,24 @@ export default function App() {
           element={
             <RoleRoute roles={['teacher', 'admin']}>
               <TeacherStudentsPage />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="teacher/professions"
+          element={
+            <RoleRoute roles={['teacher', 'admin']}>
+              <TeacherProfessionsPage />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="teacher/equipment"
+          element={
+            <RoleRoute roles={['teacher', 'admin']}>
+              <TeacherEquipmentPage />
             </RoleRoute>
           }
         />

@@ -7,6 +7,17 @@ export type TaskType = 'scan' | 'approve' | 'auto'
 export type TaskRecurrenceType = 'once' | 'daily' | 'weekly' | 'semester' | 'custom'
 export type TaskScopeType = 'school' | 'class'
 export type TaskOpenerRole = 'leader' | 'teacher'
+export type ProfessionEffectType =
+  | 'task_points_percent'
+  | 'daily_task_points_percent'
+  | 'weekly_task_points_percent'
+  | 'draw_ssr_rate_flat'
+  | 'draw_ur_rate_flat'
+  | 'points_on_scan_percent'
+  | 'points_on_button_claim_percent'
+  | 'pack_cost_discount_percent'
+export type EquipmentSlotType = 'headwear' | 'necklace' | 'ring' | 'pet'
+export type EquipmentSourceType = 'teacher' | 'task' | 'achievement' | 'shop' | 'mixed'
 
 export type TradeStatus = 'pending' | 'approved' | 'rejected'
 
@@ -174,6 +185,7 @@ export interface Task {
   window_end_time: string | null
   window_timezone: string
   code_format: 'code128' | 'qr' | 'both'
+  equipment_reward_id: string | null
   is_active: boolean
   max_completions: number | null
   starts_at: string | null
@@ -241,8 +253,138 @@ export interface Achievement {
   condition_rarity: Rarity | null
   card_reward: string | null
   points_reward: number
+  equipment_reward_id: string | null
   is_active: boolean
   created_at: string
+}
+
+export interface PlayerProgress {
+  user_id: string
+  earned_points_total: number
+  level: number
+  current_profession_id: string | null
+  profession_choice_count: number
+  available_unlocks: number
+  next_choice_tier: number
+}
+
+export interface ProfessionEffect {
+  id: string
+  profession_id: string
+  effect_type: ProfessionEffectType
+  base_value: number
+  per_level_value: number
+  max_preview_value: number
+  stack_group: string
+  description: string
+  created_at: string
+}
+
+export interface ProfessionTemplate {
+  id: string
+  name: string
+  code: string
+  description: string
+  theme_color: string
+  icon_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+  unlock_tier: number
+  is_active: boolean
+  is_system: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  profession_effects?: ProfessionEffect[]
+  effects?: ProfessionEffect[]
+}
+
+export interface PlayerProfession {
+  id: string
+  user_id: string
+  profession_id: string
+  unlocked_at_level: number
+  equipped_as_primary: boolean
+  frozen_level: number
+  frozen_effect_snapshot: Record<string, number>
+  unlocked_at: string
+  updated_at: string
+  profession?: ProfessionTemplate
+  effects?: ProfessionEffect[]
+}
+
+export interface EquipmentEffect {
+  id: string
+  equipment_id: string
+  effect_type: ProfessionEffectType
+  base_value: number
+  description: string
+  created_at: string
+}
+
+export interface EquipmentTemplate {
+  id: string
+  name: string
+  slot_type: EquipmentSlotType
+  rarity: Rarity
+  description: string
+  image_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+  source_type: EquipmentSourceType
+  shop_cost: number | null
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  equipment_effects?: EquipmentEffect[]
+}
+
+export interface PlayerEquipment {
+  id: string
+  user_id: string
+  equipment_id: string
+  quantity: number
+  is_bound: boolean
+  acquired_at: string
+  updated_at: string
+  equipment?: EquipmentTemplate
+}
+
+export interface PlayerEquippedItem {
+  user_id: string
+  slot_type: EquipmentSlotType
+  player_equipment_id: string
+  equipped_at: string
+}
+
+export interface BonusEntry {
+  source_category: 'primary' | 'archived' | 'equipment'
+  source_name: string
+  effect_type: ProfessionEffectType
+  value: number
+}
+
+export interface ComputedCharacterBonus {
+  summary: Record<ProfessionEffectType, number>
+  breakdown: {
+    primary: BonusEntry[]
+    archived: BonusEntry[]
+    equipment: BonusEntry[]
+  }
+}
+
+export interface CharacterProfilePayload {
+  progress: PlayerProgress
+  level_progress: {
+    current_level_start_points: number
+    next_level_points: number | null
+    progress_percent: number
+  }
+  current_profession: ProfessionTemplate | null
+  unlocked_professions: PlayerProfession[]
+  available_profession_choices: ProfessionTemplate[]
+  bonuses: ComputedCharacterBonus
 }
 
 export interface UserAchievement {

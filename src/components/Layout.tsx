@@ -13,9 +13,11 @@ import {
   ShoppingBag,
   Sparkles,
   Star,
+  Sword,
   Trophy,
   UserCircle,
-  Users
+  Users,
+  Wand2,
 } from 'lucide-react'
 import { ROLE_LABELS, formatRarityLabel } from '../lib/constants'
 import { supabase } from '../lib/supabase'
@@ -28,14 +30,17 @@ const navItems = [
   { to: '/cards/mine', icon: CreditCard, label: '我的牌庫', roles: ['student', 'leader', 'teacher', 'admin'] },
   { to: '/cards/packs', icon: ShoppingBag, label: '商店', roles: ['student', 'leader', 'teacher', 'admin'] },
   { to: '/tasks', icon: ListChecks, label: '任務', roles: ['student', 'leader', 'teacher', 'admin'] },
-  { to: '/scan', icon: Camera, label: '發點', roles: ['leader', 'teacher', 'admin'] },
+  { to: '/character', icon: Sword, label: '角色', roles: ['student', 'leader', 'teacher', 'admin'] },
+  { to: '/scan', icon: Camera, label: '掃碼工作站', roles: ['leader', 'teacher', 'admin'] },
   { to: '/achievements', icon: Trophy, label: '成就', roles: ['student', 'leader', 'teacher', 'admin'] },
   { to: '/trades', icon: ArrowLeftRight, label: '交換', roles: ['student', 'leader', 'teacher', 'admin'] },
   { to: '/leader', icon: ShieldCheck, label: '幹部面板', roles: ['leader', 'teacher', 'admin'] },
   { to: '/teacher/tasks', icon: Sparkles, label: '任務管理', roles: ['leader', 'teacher', 'admin'] },
   { to: '/teacher/students', icon: Users, label: '學生條碼', roles: ['teacher', 'admin'] },
+  { to: '/teacher/professions', icon: Wand2, label: '職業管理', roles: ['teacher', 'admin'] },
+  { to: '/teacher/equipment', icon: ShoppingBag, label: '裝備管理', roles: ['teacher', 'admin'] },
   { to: '/teacher', icon: Sparkles, label: '教師後台', roles: ['teacher', 'admin'] },
-  { to: '/admin', icon: Settings, label: '管理者', roles: ['admin'] }
+  { to: '/admin', icon: Settings, label: '管理者', roles: ['admin'] },
 ]
 
 export default function Layout() {
@@ -117,11 +122,11 @@ export default function Layout() {
                 >
                   <Sparkles size={14} className="text-amber-300" />
                   <span className="whitespace-nowrap">
-                    {announcement.display_name} 抽中了{' '}
-                    <span className="font-semibold" style={{ color: announcement.card_color }}>
+                    {announcement.display_name} 抽中了
+                    <span className="mx-1 font-semibold" style={{ color: announcement.card_color }}>
                       {announcement.card_name}
                     </span>
-                    {' '}· {formatRarityLabel(announcement.rarity)}
+                    {formatRarityLabel(announcement.rarity)}
                   </span>
                 </div>
               ))}
