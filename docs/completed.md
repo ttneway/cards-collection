@@ -4,6 +4,11 @@
 
 ## 2026-06-29
 
+### P3-10 AI 生成卡牌圖片
+- 狀態：已完成（需設定 `OPENAI_API_KEY` 才能正式生成）
+- 優先級：P3
+- 完成內容：卡牌管理頁已支援 AI 風格模板、提示詞補充、建立並生成卡圖；新增 Supabase Edge Function `generate-card-image` 與 `card-images` Storage bucket，生成後會自動回填卡片圖片。
+
 ### P3-3 QR Code 辨識穩定性
 - 狀態：已完成
 - 優先級：P3

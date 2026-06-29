@@ -111,6 +111,10 @@ export interface Card {
   series: string
   album_id: string | null
   image_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+  image_storage_path: string | null
+  image_generated_at: string | null
   color: string
   is_limited: boolean
   is_active: boolean
