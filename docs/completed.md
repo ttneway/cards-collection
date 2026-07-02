@@ -2,7 +2,23 @@
 
 仍待處理項目請見 [backlog.md](/D:/codex%20test/cards-collection/docs/backlog.md)。
 
+## 2026-07-03
+
+### P3-16 教師自行輸入 AI 圖片 API Key
+- 狀態：已完成
+- 優先級：P3
+- 完成內容：教師卡牌管理頁新增「教師自備 API key」設定區，可選 Gemini 或 OpenAI / ChatGPT，並輸入本次生成要使用的 API key。`generate-card-image` Edge Function 已支援 request payload 內的 `aiProvider` 與 `apiKey`，生成時優先使用教師自備 key；欄位留空時會退回使用 Supabase Edge Function Secrets 中的系統 key。
+- 安全設計：教師輸入的 API key 只暫存在目前頁面狀態，不寫入資料庫，也不寫入瀏覽器永久儲存。頁面文案會明確提示 key 會在生成時送到 Edge Function 呼叫圖片 API。
+- 介面行為：AI 設定狀態會顯示目前使用的 provider、model 與 key 來源（教師自備 key 或系統 Secret）。缺系統 secret 時，教師只要在頁面輸入自己的 key 仍可啟用生成按鈕。
+
 ## 2026-06-29
+
+### P3-15 免費額度 AI 卡圖服務串接
+- 狀態：已完成
+- 優先級：P3
+- 完成內容：查核目前官方圖片 API 後，Gemini 圖片模型與 OpenAI 圖片模型都不是穩定的永久免費 API；因此改成可切換供應商架構。`generate-card-image` Edge Function 會依 `AI_IMAGE_PROVIDER` 指定或自動偵測 `GEMINI_API_KEY` / `OPENAI_API_KEY`，預設優先使用 Gemini，OpenAI 預設模型改為較低成本的 `gpt-image-1-mini`。教師卡牌管理頁新增 AI 圖片設定狀態檢查，可直接看到目前 provider、model 與缺少的 Supabase Secret。
+- 設定方式：在 Supabase Edge Function Secrets 設定 `AI_IMAGE_PROVIDER=gemini` 搭配 `GEMINI_API_KEY`，或設定 `AI_IMAGE_PROVIDER=openai` 搭配 `OPENAI_API_KEY`。可選擇設定 `GEMINI_IMAGE_MODEL`、`OPENAI_IMAGE_MODEL` 覆寫預設模型。
+- 備註：目前尚未放入任何真實 API key；需要由專案持有人在 Supabase 後台設定 secret 後再實機生成。
 
 ### P3-14 遊戲說明 / 規則頁面
 - 狀態：已完成

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpen, ImagePlus, Pencil, Plus, Power, PowerOff, Save, Sparkles, Wand2, X } from 'lucide-react'
+import { BookOpen, ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Sparkles, Wand2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import type { Card, CardAlbum, Rarity } from '../types'
@@ -26,7 +26,21 @@ type CardForm = {
   is_active: boolean
 }
 
+type AiImageStatus = {
+  ready: boolean
+  configured_provider: string
+  active_provider: string | null
+  provider_label: string | null
+  model: string | null
+  missing_secret: string
+  key_source: 'teacher' | 'system' | null
+}
+
 const CARD_IMAGE_STYLE_OPTIONS = ['Q版校園奇幻', '校徽 / 徽章式收藏卡風'] as const
+const AI_PROVIDER_OPTIONS = [
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'openai', label: 'OpenAI / ChatGPT' },
+] as const
 
 const emptyAlbumForm: AlbumForm = {
   name: '',
@@ -86,14 +100,21 @@ export default function TeacherCardsPage() {
   const [savingCard, setSavingCard] = useState(false)
   const [generatingCard, setGeneratingCard] = useState(false)
   const [generatingCardId, setGeneratingCardId] = useState<string | null>(null)
+  const [aiImageStatus, setAiImageStatus] = useState<AiImageStatus | null>(null)
+  const [checkingAiStatus, setCheckingAiStatus] = useState(false)
+  const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
+  const [teacherApiKey, setTeacherApiKey] = useState('')
 
   const filteredCards = useMemo(
     () => (filter === 'all' ? cards : cards.filter(card => card.rarity === filter)),
     [cards, filter],
   )
+  const hasTeacherApiKey = teacherApiKey.trim().length > 0
+  const canUseAiImage = aiImageStatus?.ready !== false || hasTeacherApiKey
 
   useEffect(() => {
     void Promise.all([loadAlbums(), loadCards()])
+    void loadAiImageStatus()
   }, [])
 
   useEffect(() => {
@@ -125,6 +146,39 @@ export default function TeacherCardsPage() {
     }
 
     setCards((data ?? []) as CardWithAlbum[])
+  }
+
+  async function loadAiImageStatus() {
+    setCheckingAiStatus(true)
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-card-image', {
+        body: {
+          action: 'status',
+          aiProvider,
+          apiKey: teacherApiKey.trim() || undefined,
+        },
+      })
+
+      if (error) {
+        throw new Error(error.message)
+      }
+
+      setAiImageStatus(data as AiImageStatus)
+    } catch (statusError) {
+      setAiImageStatus({
+        ready: false,
+        configured_provider: 'unknown',
+        active_provider: null,
+        provider_label: null,
+        model: null,
+        missing_secret: 'GEMINI_API_KEY 或 OPENAI_API_KEY',
+        key_source: null,
+      })
+      setError(statusError instanceof Error ? statusError.message : '無法檢查 AI 圖片設定。')
+    } finally {
+      setCheckingAiStatus(false)
+    }
   }
 
   function resetAlbumForm() {
@@ -257,6 +311,8 @@ export default function TeacherCardsPage() {
           cardId: card.id,
           imagePrompt: cardForm.image_prompt.trim(),
           imageStyle: cardForm.image_style,
+          aiProvider,
+          apiKey: teacherApiKey.trim() || undefined,
         },
       })
 
@@ -275,6 +331,7 @@ export default function TeacherCardsPage() {
       }
 
       await loadCards()
+      await loadAiImageStatus()
       setMessage(data?.message ?? '已生成卡片圖片。')
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : '生成卡圖失敗。')
@@ -296,6 +353,8 @@ export default function TeacherCardsPage() {
           cardId: card.id,
           imagePrompt: card.image_prompt ?? '',
           imageStyle: card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0],
+          aiProvider,
+          apiKey: teacherApiKey.trim() || undefined,
         },
       })
 
@@ -313,6 +372,7 @@ export default function TeacherCardsPage() {
       }
 
       await loadCards()
+      await loadAiImageStatus()
       setMessage(data?.message ?? `已為卡片「${card.name}」生成圖片。`)
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : '生成卡圖失敗。')
@@ -646,7 +706,65 @@ export default function TeacherCardsPage() {
 
               <div className="mt-4 space-y-2 rounded-xl border border-slate-700 bg-slate-800/70 p-3 text-sm text-slate-300">
                 <p>AI 會自動參考：卡片名稱、稀有度、分集冊主題、主色與你的補充提示詞。</p>
-                <p>如果尚未設定 `OPENAI_API_KEY`，系統會提示你先補上 Supabase Secret。</p>
+                <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-white">
+                    <KeyRound size={16} className="text-fuchsia-300" />
+                    教師自備 API key
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[0.7fr_1.3fr]">
+                    <label className="space-y-1">
+                      <span className="text-xs text-slate-400">供應商</span>
+                      <select
+                        value={aiProvider}
+                        onChange={event => setAiProvider(event.target.value as typeof aiProvider)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                      >
+                        {AI_PROVIDER_OPTIONS.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs text-slate-400">API key</span>
+                      <input
+                        type="password"
+                        value={teacherApiKey}
+                        onChange={event => setTeacherApiKey(event.target.value)}
+                        placeholder="留空時使用系統 Secret"
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                      />
+                    </label>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    這個 key 只暫存在目前頁面，不會寫入資料庫；按下生成時會送到 Edge Function 呼叫圖片 API。
+                  </p>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className={aiImageStatus?.ready ? 'text-emerald-200' : 'text-amber-200'}>
+                      {aiImageStatus?.ready
+                        ? `目前使用 ${aiImageStatus.provider_label}：${aiImageStatus.model}${aiImageStatus.key_source === 'teacher' ? '（教師自備 key）' : '（系統 Secret）'}`
+                        : `尚未設定圖片 API Secret：${aiImageStatus?.missing_secret ?? '檢查中'}`}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      可在此輸入教師自己的 key，或在 Supabase Edge Function Secrets 設定 `AI_IMAGE_PROVIDER`、`GEMINI_API_KEY` 或 `OPENAI_API_KEY`。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadAiImageStatus()}
+                    disabled={checkingAiStatus}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={checkingAiStatus ? 'animate-spin' : ''} />
+                    檢查
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -686,7 +804,7 @@ export default function TeacherCardsPage() {
             <button
               type="button"
               onClick={generateCardImage}
-              disabled={savingCard || generatingCard || !cardForm.name.trim() || !cardForm.album_id}
+              disabled={savingCard || generatingCard || !cardForm.name.trim() || !cardForm.album_id || !canUseAiImage}
               className="inline-flex items-center gap-2 rounded-xl bg-fuchsia-600 px-5 py-3 font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50"
             >
               {generatingCard ? <Sparkles size={16} className="animate-pulse" /> : <Wand2 size={16} />}
@@ -765,7 +883,7 @@ export default function TeacherCardsPage() {
                 <button
                   type="button"
                   onClick={() => void generateCardImageForCard(card)}
-                  disabled={generatingCard && generatingCardId === card.id}
+                  disabled={(generatingCard && generatingCardId === card.id) || !canUseAiImage}
                   className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-600/20 px-3 py-2 text-sm text-fuchsia-300 hover:bg-fuchsia-600/30 disabled:opacity-50"
                 >
                   <Wand2 size={16} />

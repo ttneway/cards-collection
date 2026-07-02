@@ -12,6 +12,11 @@ const STYLE_PROMPTS: Record<string, string> = {
     'Create a clean badge-style collectible illustration inspired by school crests and medal emblems, centered composition, elegant decorative framing, readable shapes, and premium collectible card presentation.',
 }
 
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: 'OpenAI',
+  gemini: 'Google Gemini',
+}
+
 type CardRow = {
   id: string
   name: string
@@ -60,6 +65,94 @@ function decodeBase64Image(value: string) {
   return Uint8Array.from(binary, char => char.charCodeAt(0))
 }
 
+function jsonResponse(payload: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+function normalizeProvider(value: string | null) {
+  const provider = value?.trim().toLowerCase()
+  return provider === 'gemini' || provider === 'openai' ? provider : 'auto'
+}
+
+function resolveImageProvider(openAiApiKey: string, geminiApiKey: string, configuredProvider: string) {
+  if (configuredProvider === 'openai') {
+    return openAiApiKey ? 'openai' : null
+  }
+
+  if (configuredProvider === 'gemini') {
+    return geminiApiKey ? 'gemini' : null
+  }
+
+  if (geminiApiKey) return 'gemini'
+  if (openAiApiKey) return 'openai'
+  return null
+}
+
+function resolveRequestProvider(provider: string, apiKey: string) {
+  return apiKey && (provider === 'gemini' || provider === 'openai') ? provider : null
+}
+
+async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: string) {
+  const imageResponse = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${openAiApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      prompt,
+      size: '1024x1024',
+    }),
+  })
+
+  const imagePayload = await imageResponse.json()
+  if (!imageResponse.ok) {
+    const message = imagePayload?.error?.message ?? 'OpenAI 生成卡圖失敗。'
+    return { error: message, status: imageResponse.status }
+  }
+
+  const base64Image = imagePayload?.data?.[0]?.b64_json
+  if (!base64Image || typeof base64Image !== 'string') {
+    return { error: 'OpenAI 沒有回傳可用的圖片資料。', status: 502 }
+  }
+
+  return { base64Image }
+}
+
+async function generateGeminiImage(prompt: string, geminiApiKey: string, model: string) {
+  const imageResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': geminiApiKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      input: [{ type: 'text', text: prompt }],
+    }),
+  })
+
+  const imagePayload = await imageResponse.json()
+  if (!imageResponse.ok) {
+    const message = imagePayload?.error?.message ?? 'Gemini 生成卡圖失敗。'
+    return { error: message, status: imageResponse.status }
+  }
+
+  const base64Image =
+    imagePayload?.output_image?.data ??
+    imagePayload?.output?.find?.((item: { type?: string; data?: string }) => item?.type === 'image')?.data
+
+  if (!base64Image || typeof base64Image !== 'string') {
+    return { error: 'Gemini 沒有回傳可用的圖片資料。', status: 502 }
+  }
+
+  return { base64Image }
+}
+
 Deno.serve(async request => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -69,23 +162,15 @@ Deno.serve(async request => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const openAiApiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
+    const systemOpenAiApiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
+    const systemGeminiApiKey = Deno.env.get('GEMINI_API_KEY') ?? ''
+    const configuredProvider = normalizeProvider(Deno.env.get('AI_IMAGE_PROVIDER'))
+    const openAiModel = Deno.env.get('OPENAI_IMAGE_MODEL') ?? 'gpt-image-1-mini'
+    const geminiModel = Deno.env.get('GEMINI_IMAGE_MODEL') ?? 'gemini-3.1-flash-lite-image'
     const authHeader = request.headers.get('Authorization') ?? ''
 
     if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
       throw new Error('Supabase Edge Function 缺少必要環境變數。')
-    }
-
-    if (!openAiApiKey) {
-      return new Response(
-        JSON.stringify({
-          error: '尚未設定 OPENAI_API_KEY，請先在 Supabase Edge Function Secrets 中加入後再生成卡圖。',
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      )
     }
 
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -112,19 +197,56 @@ Deno.serve(async request => {
       .maybeSingle()
 
     if (actorError || !actorProfile || !['teacher', 'admin'].includes(actorProfile.role)) {
-      return new Response(JSON.stringify({ error: '只有教師或管理者可以生成卡圖。' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      return jsonResponse({ error: '只有教師或管理者可以生成卡圖。' }, 403)
+    }
+
+    const { cardId, imagePrompt, imageStyle, action, aiProvider, apiKey } = await request.json()
+    const requestProvider = normalizeProvider(typeof aiProvider === 'string' ? aiProvider : null)
+    const requestApiKey = typeof apiKey === 'string' ? apiKey.trim() : ''
+    const personalProvider = resolveRequestProvider(requestProvider, requestApiKey)
+    const systemProvider = resolveImageProvider(systemOpenAiApiKey, systemGeminiApiKey, configuredProvider)
+    const activeProvider = personalProvider ?? systemProvider
+    const openAiApiKey = personalProvider === 'openai' ? requestApiKey : systemOpenAiApiKey
+    const geminiApiKey = personalProvider === 'gemini' ? requestApiKey : systemGeminiApiKey
+    const keySource = personalProvider ? 'teacher' : activeProvider ? 'system' : null
+
+    if (action === 'status') {
+      return jsonResponse({
+        configured_provider: configuredProvider,
+        active_provider: activeProvider,
+        provider_label: activeProvider ? PROVIDER_LABELS[activeProvider] : null,
+        model: activeProvider === 'gemini' ? geminiModel : activeProvider === 'openai' ? openAiModel : null,
+        has_openai_key: Boolean(systemOpenAiApiKey),
+        has_gemini_key: Boolean(systemGeminiApiKey),
+        key_source: keySource,
+        missing_secret:
+          configuredProvider === 'gemini'
+            ? 'GEMINI_API_KEY'
+            : configuredProvider === 'openai'
+              ? 'OPENAI_API_KEY'
+            : 'OPENAI_API_KEY 或 GEMINI_API_KEY',
+        ready: Boolean(activeProvider),
       })
     }
 
-    const { cardId, imagePrompt, imageStyle } = await request.json()
+    if (!activeProvider) {
+      return jsonResponse(
+        {
+          error:
+            requestApiKey && !personalProvider
+              ? '使用教師自備 API key 時，請先選擇 OpenAI 或 Gemini。'
+              : configuredProvider === 'gemini'
+                ? '尚未設定 GEMINI_API_KEY；可由教師在頁面輸入自己的 Gemini key，或先在 Supabase Edge Function Secrets 中加入。'
+                : configuredProvider === 'openai'
+                  ? '尚未設定 OPENAI_API_KEY；可由教師在頁面輸入自己的 OpenAI key，或先在 Supabase Edge Function Secrets 中加入。'
+                  : '尚未設定圖片 API 金鑰；可由教師在頁面輸入自己的 key，或在 Supabase Edge Function Secrets 加入 GEMINI_API_KEY / OPENAI_API_KEY。',
+        },
+        400,
+      )
+    }
 
     if (!cardId || typeof cardId !== 'string') {
-      return new Response(JSON.stringify({ error: '缺少卡片 ID。' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: '缺少卡片 ID。' }, 400)
     }
 
     const { data: card, error: cardError } = await adminClient
@@ -134,10 +256,7 @@ Deno.serve(async request => {
       .maybeSingle()
 
     if (cardError || !card) {
-      return new Response(JSON.stringify({ error: '找不到要生成圖片的卡片。' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: '找不到要生成圖片的卡片。' }, 404)
     }
 
     let albumName: string | null = null
@@ -150,40 +269,18 @@ Deno.serve(async request => {
     const nextPrompt = typeof imagePrompt === 'string' ? imagePrompt.trim() : card.image_prompt ?? ''
     const finalPrompt = buildPrompt(card as CardRow, albumName, nextStyle, nextPrompt)
 
-    const imageResponse = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openAiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-image-1',
-        prompt: finalPrompt,
-        size: '1024x1024',
-      }),
-    })
+    const generationResult =
+      activeProvider === 'gemini'
+        ? await generateGeminiImage(finalPrompt, geminiApiKey, geminiModel)
+        : await generateOpenAiImage(finalPrompt, openAiApiKey, openAiModel)
 
-    const imagePayload = await imageResponse.json()
-    if (!imageResponse.ok) {
-      const message = imagePayload?.error?.message ?? 'OpenAI 生成卡圖失敗。'
-      return new Response(JSON.stringify({ error: message }), {
-        status: imageResponse.status,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    const imageData = imagePayload?.data?.[0]
-    const base64Image = imageData?.b64_json
-    if (!base64Image || typeof base64Image !== 'string') {
-      return new Response(JSON.stringify({ error: 'OpenAI 沒有回傳可用的圖片資料。' }), {
-        status: 502,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    if ('error' in generationResult) {
+      return jsonResponse({ error: generationResult.error }, generationResult.status)
     }
 
     const fileName = `${Date.now()}-${slugify(card.name || 'card')}.png`
     const filePath = `${card.id}/${fileName}`
-    const fileBytes = decodeBase64Image(base64Image)
+    const fileBytes = decodeBase64Image(generationResult.base64Image)
 
     if (card.image_storage_path) {
       await adminClient.storage.from('card-images').remove([card.image_storage_path])
@@ -195,10 +292,7 @@ Deno.serve(async request => {
     })
 
     if (uploadError) {
-      return new Response(JSON.stringify({ error: uploadError.message }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: uploadError.message }, 500)
     }
 
     const { data: publicUrlData } = adminClient.storage.from('card-images').getPublicUrl(filePath)
@@ -219,36 +313,28 @@ Deno.serve(async request => {
       .single()
 
     if (updateError) {
-      return new Response(JSON.stringify({ error: updateError.message }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: updateError.message }, 500)
     }
 
-    return new Response(
-      JSON.stringify({
+    return jsonResponse({
         card: updatedCard,
         image_url: updatePayload.image_url,
         image_storage_path: updatePayload.image_storage_path,
         image_style: nextStyle,
         image_prompt: nextPrompt || null,
+        provider: activeProvider,
+        provider_label: PROVIDER_LABELS[activeProvider],
+        key_source: keySource,
+        model: activeProvider === 'gemini' ? geminiModel : openAiModel,
         final_prompt: finalPrompt,
-        message: `已為卡片「${card.name}」生成新圖片。`,
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
-    )
+        message: `已透過 ${PROVIDER_LABELS[activeProvider]}${keySource === 'teacher' ? '（教師自備 key）' : ''} 為卡片「${card.name}」生成新圖片。`,
+      })
   } catch (error) {
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : '生成卡圖時發生未預期錯誤。',
-      }),
+    return jsonResponse(
       {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        error: error instanceof Error ? error.message : '生成卡圖時發生未預期錯誤。',
       },
+      500,
     )
   }
 })
