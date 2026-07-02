@@ -130,25 +130,36 @@ function getImageExtension(mimeType: string) {
 }
 
 async function generateGeminiImage(prompt: string, geminiApiKey: string, model: string) {
-  const imageResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+  const requestBody = {
+    model,
+    input: [{ type: 'text', text: prompt }],
+  }
+
+  let imageResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
     method: 'POST',
     headers: {
       'x-goog-api-key': geminiApiKey,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model,
-      input: prompt,
-      response_format: {
-        type: 'image',
-        mime_type: 'image/jpeg',
-        aspect_ratio: '1:1',
-        image_size: '1K',
-      },
-    }),
+    body: JSON.stringify(requestBody),
   })
 
-  const imagePayload = await imageResponse.json()
+  let imagePayload = await imageResponse.json()
+  if (!imageResponse.ok && model === 'gemini-3.1-flash-lite-image') {
+    imageResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': geminiApiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...requestBody,
+        model: 'gemini-3.1-flash-image',
+      }),
+    })
+    imagePayload = await imageResponse.json()
+  }
+
   if (!imageResponse.ok) {
     const message = imagePayload?.error?.message ?? 'Gemini 生成卡圖失敗。'
     return { error: message, status: imageResponse.status }
@@ -191,7 +202,7 @@ Deno.serve(async request => {
     const systemGeminiApiKey = Deno.env.get('GEMINI_API_KEY') ?? ''
     const configuredProvider = normalizeProvider(Deno.env.get('AI_IMAGE_PROVIDER'))
     const openAiModel = Deno.env.get('OPENAI_IMAGE_MODEL') ?? 'gpt-image-1-mini'
-    const geminiModel = Deno.env.get('GEMINI_IMAGE_MODEL') ?? 'gemini-3.1-flash-lite-image'
+    const geminiModel = Deno.env.get('GEMINI_IMAGE_MODEL') ?? 'gemini-3.1-flash-image'
     const authHeader = request.headers.get('Authorization') ?? ''
 
     if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
