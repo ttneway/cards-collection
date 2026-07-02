@@ -120,7 +120,13 @@ async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: 
     return { error: 'OpenAI 沒有回傳可用的圖片資料。', status: 502 }
   }
 
-  return { base64Image }
+  return { base64Image, mimeType: 'image/png' }
+}
+
+function getImageExtension(mimeType: string) {
+  if (mimeType === 'image/jpeg') return 'jpg'
+  if (mimeType === 'image/webp') return 'webp'
+  return 'png'
 }
 
 async function generateGeminiImage(prompt: string, geminiApiKey: string, model: string) {
@@ -133,6 +139,11 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
     body: JSON.stringify({
       model,
       input: [{ type: 'text', text: prompt }],
+      response_format: {
+        type: 'image',
+        mime_type: 'image/png',
+        aspect_ratio: '1:1',
+      },
     }),
   })
 
@@ -142,15 +153,18 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
     return { error: message, status: imageResponse.status }
   }
 
-  const base64Image =
-    imagePayload?.output_image?.data ??
-    imagePayload?.output?.find?.((item: { type?: string; data?: string }) => item?.type === 'image')?.data
+  const outputImage = imagePayload?.output_image
+  const fallbackImage = imagePayload?.output?.find?.(
+    (item: { type?: string; data?: string; mime_type?: string }) => item?.type === 'image',
+  )
+  const base64Image = outputImage?.data ?? fallbackImage?.data
+  const mimeType = outputImage?.mime_type ?? fallbackImage?.mime_type ?? 'image/png'
 
   if (!base64Image || typeof base64Image !== 'string') {
     return { error: 'Gemini 沒有回傳可用的圖片資料。', status: 502 }
   }
 
-  return { base64Image }
+  return { base64Image, mimeType }
 }
 
 Deno.serve(async request => {
@@ -278,7 +292,9 @@ Deno.serve(async request => {
       return jsonResponse({ error: generationResult.error }, generationResult.status)
     }
 
-    const fileName = `${Date.now()}-${slugify(card.name || 'card')}.png`
+    const mimeType = generationResult.mimeType ?? 'image/png'
+    const fileExtension = getImageExtension(mimeType)
+    const fileName = `${Date.now()}-${slugify(card.name || 'card')}.${fileExtension}`
     const filePath = `${card.id}/${fileName}`
     const fileBytes = decodeBase64Image(generationResult.base64Image)
 
@@ -287,7 +303,7 @@ Deno.serve(async request => {
     }
 
     const { error: uploadError } = await adminClient.storage.from('card-images').upload(filePath, fileBytes, {
-      contentType: 'image/png',
+      contentType: mimeType,
       upsert: true,
     })
 
