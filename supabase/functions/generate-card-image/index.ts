@@ -138,11 +138,12 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
     },
     body: JSON.stringify({
       model,
-      input: [{ type: 'text', text: prompt }],
+      input: prompt,
       response_format: {
         type: 'image',
-        mime_type: 'image/png',
+        mime_type: 'image/jpeg',
         aspect_ratio: '1:1',
+        image_size: '1K',
       },
     }),
   })
@@ -154,11 +155,21 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
   }
 
   const outputImage = imagePayload?.output_image
-  const fallbackImage = imagePayload?.output?.find?.(
-    (item: { type?: string; data?: string; mime_type?: string }) => item?.type === 'image',
-  )
+  const fallbackImage =
+    imagePayload?.output?.find?.((item: { type?: string; data?: string; mime_type?: string }) => item?.type === 'image') ??
+    imagePayload?.steps
+      ?.flatMap?.(
+        (step: {
+          content?: Array<{ type?: string; data?: string; mime_type?: string }>
+          summary?: Array<{ type?: string; data?: string; mime_type?: string }>
+        }) => [...(step?.content ?? []), ...(step?.summary ?? [])],
+      )
+      ?.find?.((item: { type?: string; data?: string; mime_type?: string }) => item?.type === 'image')
   const base64Image = outputImage?.data ?? fallbackImage?.data
-  const mimeType = outputImage?.mime_type ?? fallbackImage?.mime_type ?? 'image/png'
+  const mimeType = outputImage?.mime_type ?? fallbackImage?.mime_type ?? 'image/jpeg'
+  const outputText =
+    imagePayload?.output_text ??
+    imagePayload?.output?.find?.((item: { type?: string; text?: string }) => item?.type === 'text')?.text
 
   if (!base64Image || typeof base64Image !== 'string') {
     return { error: 'Gemini 沒有回傳可用的圖片資料。', status: 502 }
