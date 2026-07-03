@@ -66,6 +66,18 @@ function decodeBase64Image(value: string) {
   return Uint8Array.from(binary, char => char.charCodeAt(0))
 }
 
+function encodeBase64Image(bytes: Uint8Array) {
+  let binary = ''
+  const chunkSize = 0x8000
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize)
+    binary += String.fromCharCode(...chunk)
+  }
+
+  return btoa(binary)
+}
+
 function jsonResponse(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -177,7 +189,7 @@ async function generateHuggingFaceImage(prompt: string, huggingFaceApiKey: strin
   }
 
   const imageBytes = new Uint8Array(await imageResponse.arrayBuffer())
-  const base64Image = btoa(String.fromCharCode(...imageBytes))
+  const base64Image = encodeBase64Image(imageBytes)
   const mimeType = contentType.split(';')[0] || 'image/png'
 
   return {

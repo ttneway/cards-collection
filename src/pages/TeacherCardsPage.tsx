@@ -110,6 +110,37 @@ function formatDiagnosticsText(diagnostics: AiDiagnostics | string | null | unde
   return lines.length > 0 ? lines.join('\n') : null
 }
 
+async function invokeImageFunction(body: Record<string, unknown>) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-card-image`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? ''}`,
+    },
+    body: JSON.stringify(body),
+  })
+
+  const responseText = await response.text()
+  let payload: Record<string, unknown> | null = null
+
+  try {
+    payload = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : null
+  } catch {
+    payload = { error: responseText || `Edge Function returned HTTP ${response.status}` }
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    data: payload,
+  }
+}
+
 export default function TeacherCardsPage() {
   const appVersion = __APP_VERSION__
   const [albums, setAlbums] = useState<CardAlbum[]>([])
@@ -179,19 +210,17 @@ export default function TeacherCardsPage() {
     setCheckingAiStatus(true)
 
     try {
-      const { data, error } = await supabase.functions.invoke('generate-card-image', {
-        body: {
-          action: 'status',
-          aiProvider,
-          apiKey: teacherApiKey.trim() || undefined,
-        },
+      const result = await invokeImageFunction({
+        action: 'status',
+        aiProvider,
+        apiKey: teacherApiKey.trim() || undefined,
       })
 
-      if (error) {
-        throw new Error(error.message)
+      if (!result.ok || !result.data) {
+        throw new Error((result.data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
       }
 
-      setAiImageStatus(data as AiImageStatus)
+      setAiImageStatus(result.data as unknown as AiImageStatus)
     } catch (statusError) {
       setAiImageStatus({
         ready: false,
@@ -214,23 +243,23 @@ export default function TeacherCardsPage() {
     setError(null)
 
     try {
-      const { data, error } = await supabase.functions.invoke('generate-card-image', {
-        body: {
-          action: 'probe',
-          aiProvider,
-          apiKey: teacherApiKey.trim() || undefined,
-        },
+      const result = await invokeImageFunction({
+        action: 'probe',
+        aiProvider,
+        apiKey: teacherApiKey.trim() || undefined,
       })
 
-      if (error) {
-        throw new Error(error.message)
-      }
-
+      const data = result.data as Record<string, any> | null
       const diagnosticsText = formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null)
+
+      if (!result.ok) {
+        setAiDiagnostics(diagnosticsText)
+        throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+      }
 
       if (data?.error) {
         setAiDiagnostics(diagnosticsText)
-        throw new Error(data.error)
+        throw new Error(data.error as string)
       }
 
       setAiDiagnostics(diagnosticsText)
@@ -368,23 +397,24 @@ export default function TeacherCardsPage() {
       const card = await upsertCard()
       setGeneratingCardId(card.id)
 
-      const { data, error } = await supabase.functions.invoke('generate-card-image', {
-        body: {
-          cardId: card.id,
-          imagePrompt: cardForm.image_prompt.trim(),
-          imageStyle: cardForm.image_style,
-          aiProvider,
-          apiKey: teacherApiKey.trim() || undefined,
-        },
+      const result = await invokeImageFunction({
+        cardId: card.id,
+        imagePrompt: cardForm.image_prompt.trim(),
+        imageStyle: cardForm.image_style,
+        aiProvider,
+        apiKey: teacherApiKey.trim() || undefined,
       })
 
-      if (error) {
-        throw new Error(error.message)
+      const data = result.data as Record<string, any> | null
+
+      if (!result.ok) {
+        setAiDiagnostics(formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null))
+        throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
       }
 
       if (data?.error) {
         setAiDiagnostics(formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null))
-        throw new Error(data.error)
+        throw new Error(data.error as string)
       }
 
       const nextCard = data?.card as CardWithAlbum | undefined
@@ -412,23 +442,24 @@ export default function TeacherCardsPage() {
     setAiDiagnostics(null)
 
     try {
-      const { data, error } = await supabase.functions.invoke('generate-card-image', {
-        body: {
-          cardId: card.id,
-          imagePrompt: card.image_prompt ?? '',
-          imageStyle: card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0],
-          aiProvider,
-          apiKey: teacherApiKey.trim() || undefined,
-        },
+      const result = await invokeImageFunction({
+        cardId: card.id,
+        imagePrompt: card.image_prompt ?? '',
+        imageStyle: card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0],
+        aiProvider,
+        apiKey: teacherApiKey.trim() || undefined,
       })
 
-      if (error) {
-        throw new Error(error.message)
+      const data = result.data as Record<string, any> | null
+
+      if (!result.ok) {
+        setAiDiagnostics(formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null))
+        throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
       }
 
       if (data?.error) {
         setAiDiagnostics(formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null))
-        throw new Error(data.error)
+        throw new Error(data.error as string)
       }
 
       const nextCard = data?.card as CardWithAlbum | undefined
