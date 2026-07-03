@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import type { Card, CardAlbum, Rarity } from '../types'
 
+declare const __APP_VERSION__: string
+
 type CardWithAlbum = Card & { album?: CardAlbum | null }
 
 type AlbumForm = {
@@ -109,6 +111,7 @@ function formatDiagnosticsText(diagnostics: AiDiagnostics | string | null | unde
 }
 
 export default function TeacherCardsPage() {
+  const appVersion = __APP_VERSION__
   const [albums, setAlbums] = useState<CardAlbum[]>([])
   const [cards, setCards] = useState<CardWithAlbum[]>([])
   const [editingAlbumId, setEditingAlbumId] = useState<string | null>(null)
@@ -491,6 +494,11 @@ export default function TeacherCardsPage() {
   return (
     <div className="space-y-6">
       <div>
+        <div className="mb-2 flex justify-end">
+          <span className="rounded-full border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs text-slate-300">
+            版本 {appVersion}
+          </span>
+        </div>
         <h1 className="text-2xl font-bold text-white">卡牌與分集冊管理</h1>
         <p className="mt-1 text-sm text-slate-400">
           教師可建立分集冊、維護卡片資料，並利用 AI 依固定風格生成卡圖。
