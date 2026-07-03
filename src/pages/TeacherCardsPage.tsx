@@ -36,6 +36,13 @@ type AiImageStatus = {
   key_source: 'teacher' | 'system' | null
 }
 
+type AiDiagnostics = {
+  provider?: string | null
+  model?: string | null
+  status?: number | null
+  debug?: string | null
+}
+
 const CARD_IMAGE_STYLE_OPTIONS = ['Q版校園奇幻', '校徽 / 徽章式收藏卡風'] as const
 const AI_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini' },
@@ -86,6 +93,20 @@ function mapCardToForm(card: CardWithAlbum): CardForm {
   }
 }
 
+function formatDiagnosticsText(diagnostics: AiDiagnostics | string | null | undefined) {
+  if (!diagnostics) return null
+  if (typeof diagnostics === 'string') return diagnostics
+
+  const lines = [
+    diagnostics.provider ? `provider: ${diagnostics.provider}` : null,
+    diagnostics.model ? `model: ${diagnostics.model}` : null,
+    typeof diagnostics.status === 'number' ? `status: ${diagnostics.status}` : null,
+    diagnostics.debug ? `debug: ${diagnostics.debug}` : null,
+  ].filter(Boolean)
+
+  return lines.length > 0 ? lines.join('\n') : null
+}
+
 export default function TeacherCardsPage() {
   const [albums, setAlbums] = useState<CardAlbum[]>([])
   const [cards, setCards] = useState<CardWithAlbum[]>([])
@@ -101,7 +122,9 @@ export default function TeacherCardsPage() {
   const [generatingCard, setGeneratingCard] = useState(false)
   const [generatingCardId, setGeneratingCardId] = useState<string | null>(null)
   const [aiImageStatus, setAiImageStatus] = useState<AiImageStatus | null>(null)
+  const [aiDiagnostics, setAiDiagnostics] = useState<string | null>(null)
   const [checkingAiStatus, setCheckingAiStatus] = useState(false)
+  const [probingAiImage, setProbingAiImage] = useState(false)
   const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [teacherApiKey, setTeacherApiKey] = useState('')
 
@@ -178,6 +201,40 @@ export default function TeacherCardsPage() {
       setError(statusError instanceof Error ? statusError.message : '無法檢查 AI 圖片設定。')
     } finally {
       setCheckingAiStatus(false)
+    }
+  }
+
+  async function probeAiImage() {
+    setProbingAiImage(true)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-card-image', {
+        body: {
+          action: 'probe',
+          aiProvider,
+          apiKey: teacherApiKey.trim() || undefined,
+        },
+      })
+
+      if (error) {
+        throw new Error(error.message)
+      }
+
+      const diagnosticsText = formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null)
+
+      if (data?.error) {
+        setAiDiagnostics(diagnosticsText)
+        throw new Error(data.error)
+      }
+
+      setAiDiagnostics(diagnosticsText)
+      setMessage(data?.ok ? 'AI 生圖診斷完成，已拿到服務回應。' : 'AI 生圖診斷完成。')
+    } catch (probeError) {
+      setError(probeError instanceof Error ? probeError.message : 'AI 生圖診斷失敗。')
+    } finally {
+      setProbingAiImage(false)
     }
   }
 
@@ -301,6 +358,7 @@ export default function TeacherCardsPage() {
     setGeneratingCard(true)
     setMessage(null)
     setError(null)
+    setAiDiagnostics(null)
 
     try {
       const card = await upsertCard()
@@ -321,6 +379,7 @@ export default function TeacherCardsPage() {
       }
 
       if (data?.error) {
+        setAiDiagnostics(formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null))
         throw new Error(data.error)
       }
 
@@ -346,6 +405,7 @@ export default function TeacherCardsPage() {
     setGeneratingCardId(card.id)
     setMessage(null)
     setError(null)
+    setAiDiagnostics(null)
 
     try {
       const { data, error } = await supabase.functions.invoke('generate-card-image', {
@@ -363,6 +423,7 @@ export default function TeacherCardsPage() {
       }
 
       if (data?.error) {
+        setAiDiagnostics(formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null))
         throw new Error(data.error)
       }
 
@@ -765,6 +826,23 @@ export default function TeacherCardsPage() {
                     檢查
                   </button>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void probeAiImage()}
+                    disabled={probingAiImage}
+                    className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-900/40 px-3 py-2 text-xs text-fuchsia-200 hover:bg-fuchsia-900/60 disabled:opacity-50"
+                  >
+                    {probingAiImage ? <Sparkles size={14} className="animate-pulse" /> : <Wand2 size={14} />}
+                    {probingAiImage ? '診斷中...' : '診斷連線'}
+                  </button>
+                </div>
+                {aiDiagnostics ? (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+                    <p className="mb-2 text-xs font-medium text-amber-200">AI 診斷資訊</p>
+                    <pre className="whitespace-pre-wrap break-words text-xs text-amber-100">{aiDiagnostics}</pre>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

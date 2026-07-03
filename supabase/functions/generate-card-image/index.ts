@@ -72,6 +72,16 @@ function jsonResponse(payload: Record<string, unknown>, status = 200) {
   })
 }
 
+function debugSummary(value: unknown, maxLength = 700) {
+  try {
+    const text = JSON.stringify(value)
+    if (!text) return null
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+  } catch {
+    return null
+  }
+}
+
 function normalizeProvider(value: string | null) {
   const provider = value?.trim().toLowerCase()
   return provider === 'gemini' || provider === 'openai' ? provider : 'auto'
@@ -112,7 +122,7 @@ async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: 
   const imagePayload = await imageResponse.json()
   if (!imageResponse.ok) {
     const message = imagePayload?.error?.message ?? 'OpenAI 生成卡圖失敗。'
-    return { error: message, status: imageResponse.status }
+    return { error: message, status: imageResponse.status, modelUsed: model, debug: debugSummary(imagePayload) }
   }
 
   const base64Image = imagePayload?.data?.[0]?.b64_json
@@ -135,6 +145,7 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
     input: [{ type: 'text', text: prompt }],
   }
 
+  let attemptedModel = model
   let imageResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
     method: 'POST',
     headers: {
@@ -146,6 +157,7 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
 
   let imagePayload = await imageResponse.json()
   if (!imageResponse.ok && model === 'gemini-3.1-flash-lite-image') {
+    attemptedModel = 'gemini-3.1-flash-image'
     imageResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
       method: 'POST',
       headers: {
@@ -154,7 +166,7 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
       },
       body: JSON.stringify({
         ...requestBody,
-        model: 'gemini-3.1-flash-image',
+        model: attemptedModel,
       }),
     })
     imagePayload = await imageResponse.json()
@@ -162,7 +174,12 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
 
   if (!imageResponse.ok) {
     const message = imagePayload?.error?.message ?? 'Gemini 生成卡圖失敗。'
-    return { error: message, status: imageResponse.status }
+    return {
+      error: message,
+      status: imageResponse.status,
+      modelUsed: attemptedModel,
+      debug: debugSummary(imagePayload),
+    }
   }
 
   const outputImage = imagePayload?.output_image
@@ -183,10 +200,20 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
     imagePayload?.output?.find?.((item: { type?: string; text?: string }) => item?.type === 'text')?.text
 
   if (!base64Image || typeof base64Image !== 'string') {
-    return { error: 'Gemini 沒有回傳可用的圖片資料。', status: 502 }
+    return {
+      error: outputText ? `Gemini did not return image data. Text output: ${outputText}` : 'Gemini did not return image data.',
+      status: 502,
+      modelUsed: attemptedModel,
+      debug: debugSummary(imagePayload),
+    }
   }
 
-  return { base64Image, mimeType }
+  return {
+    base64Image,
+    mimeType,
+    modelUsed: attemptedModel,
+    debug: debugSummary({ output_image: outputImage, has_fallback: Boolean(fallbackImage) }),
+  }
 }
 
 Deno.serve(async request => {
@@ -281,6 +308,36 @@ Deno.serve(async request => {
       )
     }
 
+    if (action === 'probe') {
+      const probePrompt = 'Create a simple school badge illustration with a star on a plain background.'
+      const probeResult =
+        activeProvider === 'gemini'
+          ? await generateGeminiImage(probePrompt, geminiApiKey, geminiModel)
+          : await generateOpenAiImage(probePrompt, openAiApiKey, openAiModel)
+
+      if ('error' in probeResult) {
+        return jsonResponse(
+          {
+            error: probeResult.error,
+            diagnostics: {
+              provider: activeProvider,
+              model: probeResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : openAiModel),
+              status: probeResult.status,
+              debug: probeResult.debug ?? null,
+            },
+          },
+          200,
+        )
+      }
+
+      return jsonResponse({
+        ok: true,
+        provider: activeProvider,
+        model: probeResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : openAiModel),
+        diagnostics: probeResult.debug ?? null,
+      })
+    }
+
     if (!cardId || typeof cardId !== 'string') {
       return jsonResponse({ error: '缺少卡片 ID。' }, 400)
     }
@@ -311,7 +368,18 @@ Deno.serve(async request => {
         : await generateOpenAiImage(finalPrompt, openAiApiKey, openAiModel)
 
     if ('error' in generationResult) {
-      return jsonResponse({ error: generationResult.error }, generationResult.status)
+      return jsonResponse(
+        {
+          error: generationResult.error,
+          diagnostics: {
+            provider: activeProvider,
+            model: generationResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : openAiModel),
+            status: generationResult.status,
+            debug: generationResult.debug ?? null,
+          },
+        },
+        200,
+      )
     }
 
     const mimeType = generationResult.mimeType ?? 'image/png'
