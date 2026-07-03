@@ -78,6 +78,13 @@ function encodeBase64Image(bytes: Uint8Array) {
   return btoa(binary)
 }
 
+function encodeModelPath(model: string) {
+  return model
+    .split('/')
+    .map(segment => encodeURIComponent(segment))
+    .join('/')
+}
+
 function jsonResponse(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -152,7 +159,8 @@ async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: 
 }
 
 async function generateHuggingFaceImage(prompt: string, huggingFaceApiKey: string, model: string) {
-  const imageResponse = await fetch(`https://api-inference.huggingface.co/models/${encodeURIComponent(model)}`, {
+  const modelPath = encodeModelPath(model)
+  const imageResponse = await fetch(`https://router.huggingface.co/hf-inference/models/${modelPath}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${huggingFaceApiKey}`,
