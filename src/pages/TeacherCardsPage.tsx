@@ -47,6 +47,7 @@ const CARD_IMAGE_STYLE_OPTIONS = ['Q版校園奇幻', '校徽 / 徽章式收藏�
 const AI_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini' },
   { value: 'openai', label: 'OpenAI / ChatGPT' },
+  { value: 'huggingface', label: 'Hugging Face' },
 ] as const
 
 const emptyAlbumForm: AlbumForm = {

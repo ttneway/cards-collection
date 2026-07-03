@@ -15,6 +15,7 @@ const STYLE_PROMPTS: Record<string, string> = {
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   gemini: 'Google Gemini',
+  huggingface: 'Hugging Face',
 }
 
 type CardRow = {
@@ -84,10 +85,10 @@ function debugSummary(value: unknown, maxLength = 700) {
 
 function normalizeProvider(value: string | null) {
   const provider = value?.trim().toLowerCase()
-  return provider === 'gemini' || provider === 'openai' ? provider : 'auto'
+  return provider === 'gemini' || provider === 'openai' || provider === 'huggingface' ? provider : 'auto'
 }
 
-function resolveImageProvider(openAiApiKey: string, geminiApiKey: string, configuredProvider: string) {
+function resolveImageProvider(openAiApiKey: string, geminiApiKey: string, huggingFaceApiKey: string, configuredProvider: string) {
   if (configuredProvider === 'openai') {
     return openAiApiKey ? 'openai' : null
   }
@@ -96,13 +97,18 @@ function resolveImageProvider(openAiApiKey: string, geminiApiKey: string, config
     return geminiApiKey ? 'gemini' : null
   }
 
+  if (configuredProvider === 'huggingface') {
+    return huggingFaceApiKey ? 'huggingface' : null
+  }
+
   if (geminiApiKey) return 'gemini'
   if (openAiApiKey) return 'openai'
+  if (huggingFaceApiKey) return 'huggingface'
   return null
 }
 
 function resolveRequestProvider(provider: string, apiKey: string) {
-  return apiKey && (provider === 'gemini' || provider === 'openai') ? provider : null
+  return apiKey && (provider === 'gemini' || provider === 'openai' || provider === 'huggingface') ? provider : null
 }
 
 async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: string) {
@@ -131,6 +137,55 @@ async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: 
   }
 
   return { base64Image, mimeType: 'image/png' }
+}
+
+async function generateHuggingFaceImage(prompt: string, huggingFaceApiKey: string, model: string) {
+  const imageResponse = await fetch(`https://api-inference.huggingface.co/models/${encodeURIComponent(model)}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${huggingFaceApiKey}`,
+      'Content-Type': 'application/json',
+      Accept: 'image/*',
+    },
+    body: JSON.stringify({
+      inputs: prompt,
+      parameters: {
+        width: 1024,
+        height: 1024,
+        num_inference_steps: 4,
+      },
+    }),
+  })
+
+  const contentType = imageResponse.headers.get('content-type') ?? ''
+  if (!imageResponse.ok) {
+    const errorPayload = contentType.includes('application/json') ? await imageResponse.json() : await imageResponse.text()
+    const message =
+      (typeof errorPayload === 'object' &&
+      errorPayload &&
+      'error' in errorPayload &&
+      typeof errorPayload.error === 'string'
+        ? errorPayload.error
+        : null) ?? 'Hugging Face image generation failed.'
+
+    return {
+      error: message,
+      status: imageResponse.status,
+      modelUsed: model,
+      debug: debugSummary(errorPayload),
+    }
+  }
+
+  const imageBytes = new Uint8Array(await imageResponse.arrayBuffer())
+  const base64Image = btoa(String.fromCharCode(...imageBytes))
+  const mimeType = contentType.split(';')[0] || 'image/png'
+
+  return {
+    base64Image,
+    mimeType,
+    modelUsed: model,
+    debug: debugSummary({ contentType, bytes: imageBytes.byteLength }),
+  }
 }
 
 function getImageExtension(mimeType: string) {
@@ -227,9 +282,11 @@ Deno.serve(async request => {
     const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     const systemOpenAiApiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
     const systemGeminiApiKey = Deno.env.get('GEMINI_API_KEY') ?? ''
+    const systemHuggingFaceApiKey = Deno.env.get('HUGGINGFACE_API_KEY') ?? ''
     const configuredProvider = normalizeProvider(Deno.env.get('AI_IMAGE_PROVIDER'))
     const openAiModel = Deno.env.get('OPENAI_IMAGE_MODEL') ?? 'gpt-image-1-mini'
     const geminiModel = Deno.env.get('GEMINI_IMAGE_MODEL') ?? 'gemini-3.1-flash-image'
+    const huggingFaceModel = Deno.env.get('HUGGINGFACE_IMAGE_MODEL') ?? 'black-forest-labs/FLUX.1-schnell'
     const authHeader = request.headers.get('Authorization') ?? ''
 
     if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
@@ -267,10 +324,16 @@ Deno.serve(async request => {
     const requestProvider = normalizeProvider(typeof aiProvider === 'string' ? aiProvider : null)
     const requestApiKey = typeof apiKey === 'string' ? apiKey.trim() : ''
     const personalProvider = resolveRequestProvider(requestProvider, requestApiKey)
-    const systemProvider = resolveImageProvider(systemOpenAiApiKey, systemGeminiApiKey, configuredProvider)
+    const systemProvider = resolveImageProvider(
+      systemOpenAiApiKey,
+      systemGeminiApiKey,
+      systemHuggingFaceApiKey,
+      configuredProvider,
+    )
     const activeProvider = personalProvider ?? systemProvider
     const openAiApiKey = personalProvider === 'openai' ? requestApiKey : systemOpenAiApiKey
     const geminiApiKey = personalProvider === 'gemini' ? requestApiKey : systemGeminiApiKey
+    const huggingFaceApiKey = personalProvider === 'huggingface' ? requestApiKey : systemHuggingFaceApiKey
     const keySource = personalProvider ? 'teacher' : activeProvider ? 'system' : null
 
     if (action === 'status') {
@@ -278,9 +341,10 @@ Deno.serve(async request => {
         configured_provider: configuredProvider,
         active_provider: activeProvider,
         provider_label: activeProvider ? PROVIDER_LABELS[activeProvider] : null,
-        model: activeProvider === 'gemini' ? geminiModel : activeProvider === 'openai' ? openAiModel : null,
+        model: activeProvider === 'gemini' ? geminiModel : activeProvider === 'openai' ? openAiModel : activeProvider === 'huggingface' ? huggingFaceModel : null,
         has_openai_key: Boolean(systemOpenAiApiKey),
         has_gemini_key: Boolean(systemGeminiApiKey),
+        has_huggingface_key: Boolean(systemHuggingFaceApiKey),
         key_source: keySource,
         missing_secret:
           configuredProvider === 'gemini'
@@ -313,7 +377,9 @@ Deno.serve(async request => {
       const probeResult =
         activeProvider === 'gemini'
           ? await generateGeminiImage(probePrompt, geminiApiKey, geminiModel)
-          : await generateOpenAiImage(probePrompt, openAiApiKey, openAiModel)
+          : activeProvider === 'huggingface'
+            ? await generateHuggingFaceImage(probePrompt, huggingFaceApiKey, huggingFaceModel)
+            : await generateOpenAiImage(probePrompt, openAiApiKey, openAiModel)
 
       if ('error' in probeResult) {
         return jsonResponse(
@@ -321,7 +387,7 @@ Deno.serve(async request => {
             error: probeResult.error,
             diagnostics: {
               provider: activeProvider,
-              model: probeResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : openAiModel),
+              model: probeResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : activeProvider === 'huggingface' ? huggingFaceModel : openAiModel),
               status: probeResult.status,
               debug: probeResult.debug ?? null,
             },
@@ -333,7 +399,7 @@ Deno.serve(async request => {
       return jsonResponse({
         ok: true,
         provider: activeProvider,
-        model: probeResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : openAiModel),
+        model: probeResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : activeProvider === 'huggingface' ? huggingFaceModel : openAiModel),
         diagnostics: probeResult.debug ?? null,
       })
     }
@@ -365,7 +431,9 @@ Deno.serve(async request => {
     const generationResult =
       activeProvider === 'gemini'
         ? await generateGeminiImage(finalPrompt, geminiApiKey, geminiModel)
-        : await generateOpenAiImage(finalPrompt, openAiApiKey, openAiModel)
+        : activeProvider === 'huggingface'
+          ? await generateHuggingFaceImage(finalPrompt, huggingFaceApiKey, huggingFaceModel)
+          : await generateOpenAiImage(finalPrompt, openAiApiKey, openAiModel)
 
     if ('error' in generationResult) {
       return jsonResponse(
@@ -373,7 +441,7 @@ Deno.serve(async request => {
           error: generationResult.error,
           diagnostics: {
             provider: activeProvider,
-            model: generationResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : openAiModel),
+            model: generationResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : activeProvider === 'huggingface' ? huggingFaceModel : openAiModel),
             status: generationResult.status,
             debug: generationResult.debug ?? null,
           },
@@ -431,7 +499,7 @@ Deno.serve(async request => {
         provider: activeProvider,
         provider_label: PROVIDER_LABELS[activeProvider],
         key_source: keySource,
-        model: activeProvider === 'gemini' ? geminiModel : openAiModel,
+        model: activeProvider === 'gemini' ? geminiModel : activeProvider === 'huggingface' ? huggingFaceModel : openAiModel,
         final_prompt: finalPrompt,
         message: `已透過 ${PROVIDER_LABELS[activeProvider]}${keySource === 'teacher' ? '（教師自備 key）' : ''} 為卡片「${card.name}」生成新圖片。`,
       })
