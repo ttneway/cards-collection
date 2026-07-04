@@ -10,6 +10,7 @@ type PackForm = {
   name: string
   description: string
   cost: string
+  cards_per_open: string
   image_url: string
   is_active: boolean
 }
@@ -25,6 +26,7 @@ const emptyPackForm: PackForm = {
   name: '',
   description: '',
   cost: '100',
+  cards_per_open: '1',
   image_url: '',
   is_active: true,
 }
@@ -179,6 +181,7 @@ export default function TeacherPacksPage() {
       name: pack.name,
       description: pack.description ?? '',
       cost: String(pack.cost ?? 0),
+      cards_per_open: String(pack.cards_per_open ?? 1),
       image_url: pack.image_url ?? '',
       is_active: pack.is_active,
     })
@@ -205,10 +208,18 @@ export default function TeacherPacksPage() {
       return
     }
 
+    const cardsPerOpen = Number(packForm.cards_per_open)
+    if (!Number.isFinite(cardsPerOpen) || cardsPerOpen < 1 || cardsPerOpen > 20) {
+      setError('每次開包張數需介於 1 到 20 張。')
+      setSaving(false)
+      return
+    }
+
     const payload = {
       name: packForm.name.trim(),
       description: packForm.description.trim(),
       cost: Number(packForm.cost),
+      cards_per_open: cardsPerOpen,
       image_url: packForm.image_url.trim() || null,
       is_active: packForm.is_active,
     }
@@ -353,6 +364,18 @@ export default function TeacherPacksPage() {
                   min="0"
                   value={packForm.cost}
                   onChange={event => setPackForm(previous => ({ ...previous, cost: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">每次開包張數</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={packForm.cards_per_open}
+                  onChange={event => setPackForm(previous => ({ ...previous, cards_per_open: event.target.value }))}
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
                 />
               </label>
@@ -543,6 +566,7 @@ export default function TeacherPacksPage() {
                     <h3 className="text-lg font-semibold text-white">{pack.name}</h3>
                     <p className="mt-1 text-sm text-slate-400">{pack.description || '尚未填寫卡包說明。'}</p>
                     <p className="mt-2 text-sm text-amber-300">售價：{pack.cost} 星星</p>
+                    <p className="mt-1 text-sm text-sky-300">每次開包：{pack.cards_per_open ?? 1} 張</p>
                   </div>
                   <span className={`rounded-full px-3 py-1 text-xs ${pack.is_active ? 'bg-emerald-500/15 text-emerald-200' : 'bg-slate-700 text-slate-300'}`}>
                     {pack.is_active ? '啟用中' : '已停用'}

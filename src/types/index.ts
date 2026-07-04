@@ -145,6 +145,7 @@ export interface CardPack {
   name: string
   description: string
   cost: number
+  cards_per_open: number
   image_url: string | null
   is_active: boolean
   created_at: string
