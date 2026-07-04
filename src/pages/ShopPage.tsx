@@ -292,6 +292,18 @@ export default function ShopPage() {
 
             {drawStage === 'opening' ? (
               <div className="flex flex-col items-center py-10 text-center">
+                {continuousPackId && drawResult ? (
+                  <div className="mb-4 flex flex-col items-center gap-3">
+                    <p className="text-sm text-slate-300">目前已連續開包 {drawResult.openCount} 次，共取得 {drawResult.cards.length} 張卡</p>
+                    <button
+                      onClick={stopContinuousDraw}
+                      className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-500"
+                    >
+                      停止連續抽
+                    </button>
+                  </div>
+                ) : null}
+
                 <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-indigo-500/20 text-indigo-300 animate-pulse">
                   <Sparkles size={26} />
                 </div>
