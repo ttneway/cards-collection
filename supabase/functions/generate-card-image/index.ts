@@ -165,7 +165,7 @@ async function generateHuggingFaceImage(prompt: string, huggingFaceApiKey: strin
     headers: {
       Authorization: `Bearer ${huggingFaceApiKey}`,
       'Content-Type': 'application/json',
-      Accept: 'image/*',
+      Accept: 'image/png',
     },
     body: JSON.stringify({
       inputs: prompt,
