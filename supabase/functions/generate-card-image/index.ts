@@ -5,11 +5,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const DEFAULT_IMAGE_STYLE = 'Q版校園奇幻'
+
 const STYLE_PROMPTS: Record<string, string> = {
-  'Q版校園奇幻':
+  [DEFAULT_IMAGE_STYLE]:
     'Create a polished chibi fantasy campus illustration with bright lighting, clear silhouette, collectible-card friendly composition, soft depth, clean outlines, and a premium mobile game reward feeling.',
   '校徽 / 徽章式收藏卡風':
     'Create a clean badge-style collectible illustration inspired by school crests and medal emblems, centered composition, elegant decorative framing, readable shapes, and premium collectible card presentation.',
+  '卡牌外框收藏卡風':
+    'Create a polished collectible trading-card illustration with a visible decorative card frame around all four edges, premium printed-card styling, readable central artwork, layered border accents, and a refined fantasy campus mobile game feel.',
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -40,22 +44,37 @@ function slugify(value: string) {
 }
 
 function buildPrompt(card: CardRow, albumName: string | null, imageStyle: string, imagePrompt: string | null) {
-  const stylePrompt = STYLE_PROMPTS[imageStyle] ?? STYLE_PROMPTS['Q版校園奇幻']
+  const stylePrompt = STYLE_PROMPTS[imageStyle] ?? STYLE_PROMPTS[DEFAULT_IMAGE_STYLE]
   const albumLabel = albumName ?? card.series ?? '校園收藏卡'
-  const customPrompt = imagePrompt?.trim() ? `Additional teacher direction: ${imagePrompt.trim()}` : ''
+  const customPrompt = imagePrompt?.trim()
+    ? `Supporting detail to include without changing the main subject: ${imagePrompt.trim()}`
+    : ''
   const description = card.description?.trim() ? `Card description: ${card.description.trim()}` : ''
+  const isFrameStyle = imageStyle === '卡牌外框收藏卡風'
+  const compositionGuardrail = isFrameStyle
+    ? 'Render the result as a complete trading card face with a visible border frame on all four edges.'
+    : 'Fill the image with the main scene and do not add a card border or printed frame.'
+  const negativePrompt = isFrameStyle
+    ? 'Avoid text, watermarks, UI, and speech bubbles.'
+    : 'Avoid text, watermarks, UI, speech bubbles, and borders inside the illustration.'
 
   return [
     stylePrompt,
     `Design artwork for a school collectible card.`,
+    `The primary subject of this card must be "${card.name}".`,
     `Card name: ${card.name}.`,
     `Album or collection theme: ${albumLabel}.`,
     `Card rarity: ${card.rarity}.`,
     `Main accent color: ${card.color ?? '#334155'}.`,
+    'Treat any additional teacher direction as supporting detail only. It must not replace the named primary subject.',
+    'If the card name describes a place, room, court, field, building, object, item, symbol, or scene, show that full subject as the main composition instead of a character close-up portrait.',
+    'If people appear, they must be secondary and clearly shown within the named scene or interacting with the named subject.',
+    compositionGuardrail,
     description,
     customPrompt,
-    'Avoid text, watermarks, UI, speech bubbles, and borders inside the illustration.',
+    negativePrompt,
     'Focus on one clear subject that matches the album theme and feels suitable for a campus card game.',
+    'Make the main subject obvious at first glance.',
   ]
     .filter(Boolean)
     .join(' ')

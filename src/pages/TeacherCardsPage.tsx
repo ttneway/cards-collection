@@ -45,7 +45,7 @@ type AiDiagnostics = {
   debug?: string | null
 }
 
-const CARD_IMAGE_STYLE_OPTIONS = ['Q版校園奇幻', '校徽 / 徽章式收藏卡風'] as const
+const CARD_IMAGE_STYLE_OPTIONS = ['Q版校園奇幻', '校徽 / 徽章式收藏卡風', '卡牌外框收藏卡風'] as const
 const AI_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini' },
   { value: 'openai', label: 'OpenAI / ChatGPT' },
