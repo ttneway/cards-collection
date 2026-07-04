@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import { useAuthStore } from '../stores/authStore'
 import type { Card, CardAlbum } from '../types'
+import { clampNumber, readStoredNumber } from '../utils/helpers'
 
 type CardWithAlbum = Card & { album?: CardAlbum | null }
 
@@ -17,6 +18,11 @@ type AlbumSummary = {
   ownedCopies: number
 }
 
+const CARD_SCALE_STORAGE_KEY = 'card-library-scale'
+const CARD_SCALE_MIN = 70
+const CARD_SCALE_MAX = 130
+const CARD_SCALE_DEFAULT = 100
+
 function getAlbumName(card: CardWithAlbum) {
   return card.album?.name ?? card.series ?? '未分類'
 }
@@ -27,6 +33,9 @@ export default function CardLibraryPage() {
   const [ownedCounts, setOwnedCounts] = useState<Record<string, number>>({})
   const [rarityFilter, setRarityFilter] = useState<string>('all')
   const [albumFilter, setAlbumFilter] = useState<string>('all')
+  const [cardScale, setCardScale] = useState<number>(() =>
+    readStoredNumber(CARD_SCALE_STORAGE_KEY, CARD_SCALE_DEFAULT, CARD_SCALE_MIN, CARD_SCALE_MAX)
+  )
 
   useEffect(() => {
     supabase
@@ -55,6 +64,10 @@ export default function CardLibraryPage() {
         setOwnedCounts(nextCounts)
       })
   }, [user])
+
+  useEffect(() => {
+    window.localStorage.setItem(CARD_SCALE_STORAGE_KEY, String(cardScale))
+  }, [cardScale])
 
   const albumSummaries = useMemo<AlbumSummary[]>(() => {
     const groups = new Map<string, AlbumSummary>()
@@ -118,6 +131,8 @@ export default function CardLibraryPage() {
       cards: filteredCards.filter(card => card.rarity === rarity)
     })).filter(group => group.cards.length > 0)
   }, [filteredCards])
+
+  const cardGridMinWidth = useMemo(() => Math.round(132 * (cardScale / 100)), [cardScale])
 
   return (
     <div className="space-y-6">
@@ -214,6 +229,29 @@ export default function CardLibraryPage() {
         ))}
       </div>
 
+      <section className="rounded-2xl bg-slate-800 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="font-semibold text-white">卡牌大小</h2>
+            <p className="mt-1 text-sm text-slate-400">拖曳滑桿，調整圖鑑中每張卡牌的顯示大小。</p>
+          </div>
+          <div className="flex items-center gap-3 lg:min-w-[320px]">
+            <span className="text-xs text-slate-400">小</span>
+            <input
+              type="range"
+              min={CARD_SCALE_MIN}
+              max={CARD_SCALE_MAX}
+              step={10}
+              value={cardScale}
+              onChange={event => setCardScale(clampNumber(Number(event.target.value), CARD_SCALE_MIN, CARD_SCALE_MAX))}
+              className="h-2 w-full cursor-pointer accent-indigo-500"
+            />
+            <span className="text-xs text-slate-400">大</span>
+            <span className="w-12 text-right text-sm text-slate-300">{cardScale}%</span>
+          </div>
+        </div>
+      </section>
+
       {grouped.length === 0 ? (
         <div className="rounded-2xl bg-slate-800 py-12 text-center text-slate-500">
           <LibraryBig size={40} className="mx-auto mb-3 text-slate-600" />
@@ -226,7 +264,7 @@ export default function CardLibraryPage() {
               {group.label}
             </h2>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardGridMinWidth}px, 1fr))` }}>
               {group.cards.map(card => {
                 const ownedCount = ownedCounts[card.id] ?? 0
                 const owned = ownedCount > 0
@@ -246,10 +284,16 @@ export default function CardLibraryPage() {
                     ) : null}
 
                     <div
-                      className="mb-2 flex aspect-[3/4] items-center justify-center rounded-xl text-center text-sm font-bold text-white"
+                      className="mb-2 aspect-[3/4] overflow-hidden rounded-xl"
                       style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}
                     >
-                      <span className="px-2">{card.name}</span>
+                      {card.image_url ? (
+                        <img src={card.image_url} alt={card.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-center text-sm font-bold text-white">
+                          <span className="px-2">{card.name}</span>
+                        </div>
+                      )}
                     </div>
 
                     <p className="truncate text-sm font-medium text-white">{card.name}</p>

@@ -17,6 +17,7 @@ import ScanStationPage from './pages/ScanStationPage'
 import ShopPage from './pages/ShopPage'
 import TasksPage from './pages/TasksPage'
 import TeacherAchievementsPage from './pages/TeacherAchievementsPage'
+import TeacherCardAlbumsPage from './pages/TeacherCardAlbumsPage'
 import TeacherCardsPage from './pages/TeacherCardsPage'
 import TeacherEquipmentPage from './pages/TeacherEquipmentPage'
 import TeacherPage from './pages/TeacherPage'
@@ -141,6 +142,15 @@ export default function App() {
           element={
             <RoleRoute roles={['teacher', 'admin']}>
               <TeacherPage />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="teacher/card-albums"
+          element={
+            <RoleRoute roles={['teacher', 'admin']}>
+              <TeacherCardAlbumsPage />
             </RoleRoute>
           }
         />

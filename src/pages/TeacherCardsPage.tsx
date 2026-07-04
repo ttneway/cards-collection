@@ -1,19 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpen, ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Sparkles, Wand2, X } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Sparkles, Upload, Wand2, X } from 'lucide-react'
+import TeacherCardManagementTabs from '../components/TeacherCardManagementTabs'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
+import { uploadImageFile } from '../lib/imageUpload'
+import { supabase } from '../lib/supabase'
 import type { Card, CardAlbum, Rarity } from '../types'
+import { clampNumber, readStoredNumber } from '../utils/helpers'
 
 declare const __APP_VERSION__: string
 
 type CardWithAlbum = Card & { album?: CardAlbum | null }
-
-type AlbumForm = {
-  name: string
-  description: string
-  cover_color: string
-  is_active: boolean
-}
 
 type CardForm = {
   name: string
@@ -45,19 +41,16 @@ type AiDiagnostics = {
   debug?: string | null
 }
 
-const CARD_IMAGE_STYLE_OPTIONS = ['Q版校園奇幻', '校徽 / 徽章式收藏卡風', '卡牌外框收藏卡風'] as const
+const CARD_IMAGE_STYLE_OPTIONS = ['Q版校園奇幻', '日系動漫插畫', '紙牌卡框風格'] as const
 const AI_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini' },
   { value: 'openai', label: 'OpenAI / ChatGPT' },
   { value: 'huggingface', label: 'Hugging Face' },
 ] as const
-
-const emptyAlbumForm: AlbumForm = {
-  name: '',
-  description: '',
-  cover_color: '#334155',
-  is_active: true,
-}
+const CARD_SCALE_STORAGE_KEY = 'teacher-cards-scale'
+const CARD_SCALE_MIN = 70
+const CARD_SCALE_MAX = 130
+const CARD_SCALE_DEFAULT = 100
 
 const emptyCardForm: CardForm = {
   name: '',
@@ -70,15 +63,6 @@ const emptyCardForm: CardForm = {
   image_style: CARD_IMAGE_STYLE_OPTIONS[0],
   is_limited: false,
   is_active: true,
-}
-
-function mapAlbumToForm(album: CardAlbum): AlbumForm {
-  return {
-    name: album.name,
-    description: album.description ?? '',
-    cover_color: album.cover_color || '#334155',
-    is_active: album.is_active,
-  }
 }
 
 function mapCardToForm(card: CardWithAlbum): CardForm {
@@ -145,14 +129,11 @@ export default function TeacherCardsPage() {
   const appVersion = __APP_VERSION__
   const [albums, setAlbums] = useState<CardAlbum[]>([])
   const [cards, setCards] = useState<CardWithAlbum[]>([])
-  const [editingAlbumId, setEditingAlbumId] = useState<string | null>(null)
   const [editingCardId, setEditingCardId] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | Rarity>('all')
-  const [albumForm, setAlbumForm] = useState<AlbumForm>(emptyAlbumForm)
   const [cardForm, setCardForm] = useState<CardForm>(emptyCardForm)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [savingAlbum, setSavingAlbum] = useState(false)
   const [savingCard, setSavingCard] = useState(false)
   const [generatingCard, setGeneratingCard] = useState(false)
   const [generatingCardId, setGeneratingCardId] = useState<string | null>(null)
@@ -160,15 +141,21 @@ export default function TeacherCardsPage() {
   const [aiDiagnostics, setAiDiagnostics] = useState<string | null>(null)
   const [checkingAiStatus, setCheckingAiStatus] = useState(false)
   const [probingAiImage, setProbingAiImage] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
   const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [teacherApiKey, setTeacherApiKey] = useState('')
+  const [cardScale, setCardScale] = useState<number>(() =>
+    readStoredNumber(CARD_SCALE_STORAGE_KEY, CARD_SCALE_DEFAULT, CARD_SCALE_MIN, CARD_SCALE_MAX)
+  )
 
   const filteredCards = useMemo(
     () => (filter === 'all' ? cards : cards.filter(card => card.rarity === filter)),
-    [cards, filter],
+    [cards, filter]
   )
   const hasTeacherApiKey = teacherApiKey.trim().length > 0
   const canUseAiImage = aiImageStatus?.ready !== false || hasTeacherApiKey
+  const hasAlbums = albums.length > 0
+  const cardGridMinWidth = useMemo(() => Math.round(220 * (cardScale / 100)), [cardScale])
 
   useEffect(() => {
     void Promise.all([loadAlbums(), loadCards()])
@@ -180,6 +167,10 @@ export default function TeacherCardsPage() {
       setCardForm(previous => ({ ...previous, album_id: albums[0].id }))
     }
   }, [albums, cardForm.album_id])
+
+  useEffect(() => {
+    window.localStorage.setItem(CARD_SCALE_STORAGE_KEY, String(cardScale))
+  }, [cardScale])
 
   async function loadAlbums() {
     const { data, error } = await supabase.from('card_albums').select('*').order('created_at', { ascending: false })
@@ -193,10 +184,7 @@ export default function TeacherCardsPage() {
   }
 
   async function loadCards() {
-    const { data, error } = await supabase
-      .from('cards')
-      .select('*, album:album_id(*)')
-      .order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('cards').select('*, album:album_id(*)').order('created_at', { ascending: false })
 
     if (error) {
       setError(error.message)
@@ -263,17 +251,12 @@ export default function TeacherCardsPage() {
       }
 
       setAiDiagnostics(diagnosticsText)
-      setMessage(data?.ok ? 'AI 生圖診斷完成，已拿到服務回應。' : 'AI 生圖診斷完成。')
+      setMessage(data?.ok ? 'AI 生圖檢查成功。' : 'AI 生圖檢查完成。')
     } catch (probeError) {
-      setError(probeError instanceof Error ? probeError.message : 'AI 生圖診斷失敗。')
+      setError(probeError instanceof Error ? probeError.message : 'AI 生圖檢查失敗。')
     } finally {
       setProbingAiImage(false)
     }
-  }
-
-  function resetAlbumForm() {
-    setEditingAlbumId(null)
-    setAlbumForm(emptyAlbumForm)
   }
 
   function resetCardForm() {
@@ -284,48 +267,28 @@ export default function TeacherCardsPage() {
     })
   }
 
-  async function saveAlbum(event: React.FormEvent) {
-    event.preventDefault()
-    setSavingAlbum(true)
+  async function handleCardImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!file) return
+
+    setUploadingImage(true)
     setMessage(null)
     setError(null)
 
-    const payload = {
-      name: albumForm.name.trim(),
-      description: albumForm.description.trim(),
-      cover_color: albumForm.cover_color,
-      is_active: albumForm.is_active,
+    try {
+      const result = await uploadImageFile(file, 'cards')
+      setCardForm(previous => ({ ...previous, image_url: result.publicUrl }))
+      setMessage('圖片上傳成功，已帶入卡牌圖片網址。')
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : '圖片上傳失敗。')
+    } finally {
+      setUploadingImage(false)
     }
-
-    if (!editingAlbumId) {
-      const { error } = await supabase.from('card_albums').insert(payload)
-
-      if (error) {
-        setError(error.message)
-      } else {
-        setMessage(`已建立分集冊「${payload.name}」。`)
-        resetAlbumForm()
-        await loadAlbums()
-      }
-
-      setSavingAlbum(false)
-      return
-    }
-
-    const { error } = await supabase.from('card_albums').update(payload).eq('id', editingAlbumId)
-
-    if (error) {
-      setError(error.message)
-    } else {
-      setMessage(`已更新分集冊「${payload.name}」。`)
-      resetAlbumForm()
-      await Promise.all([loadAlbums(), loadCards()])
-    }
-
-    setSavingAlbum(false)
   }
 
-  async function upsertCard() {
+  async function saveCardRecord() {
     const selectedAlbum = albums.find(album => album.id === cardForm.album_id)
     if (!selectedAlbum) {
       throw new Error('請先選擇分集冊。')
@@ -345,15 +308,14 @@ export default function TeacherCardsPage() {
       is_active: cardForm.is_active,
     }
 
+    if (!payload.name) {
+      throw new Error('請先輸入卡牌名稱。')
+    }
+
     if (!editingCardId) {
       const { data, error } = await supabase.from('cards').insert(payload).select('*, album:album_id(*)').single()
       if (error) throw error
-
-      const nextCard = data as CardWithAlbum
-      setEditingCardId(nextCard.id)
-      setCardForm(mapCardToForm(nextCard))
-      await loadCards()
-      return nextCard
+      return { card: data as CardWithAlbum, created: true }
     }
 
     const { data, error } = await supabase
@@ -365,10 +327,7 @@ export default function TeacherCardsPage() {
 
     if (error) throw error
 
-    const nextCard = data as CardWithAlbum
-    setCardForm(mapCardToForm(nextCard))
-    await loadCards()
-    return nextCard
+    return { card: data as CardWithAlbum, created: false }
   }
 
   async function saveCard(event: React.FormEvent) {
@@ -378,10 +337,20 @@ export default function TeacherCardsPage() {
     setError(null)
 
     try {
-      const nextCard = await upsertCard()
-      setMessage(editingCardId ? `已更新卡片「${nextCard.name}」。` : `已建立卡片「${nextCard.name}」。`)
+      const wasEditing = Boolean(editingCardId)
+      const { card, created } = await saveCardRecord()
+      await loadCards()
+
+      if (created && !wasEditing) {
+        setMessage(`已建立卡牌「${card.name}」，表單已準備好讓你繼續新增下一張。`)
+        resetCardForm()
+      } else {
+        setEditingCardId(card.id)
+        setCardForm(mapCardToForm(card))
+        setMessage(`已更新卡牌「${card.name}」。`)
+      }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '儲存卡片失敗。')
+      setError(saveError instanceof Error ? saveError.message : '卡牌儲存失敗。')
     } finally {
       setSavingCard(false)
     }
@@ -394,7 +363,9 @@ export default function TeacherCardsPage() {
     setAiDiagnostics(null)
 
     try {
-      const card = await upsertCard()
+      const { card } = await saveCardRecord()
+      setEditingCardId(card.id)
+      setCardForm(mapCardToForm(card))
       setGeneratingCardId(card.id)
 
       const result = await invokeImageFunction({
@@ -425,9 +396,9 @@ export default function TeacherCardsPage() {
 
       await loadCards()
       await loadAiImageStatus()
-      setMessage(data?.message ?? '已生成卡片圖片。')
+      setMessage(data?.message ?? 'AI 卡圖已生成完成。')
     } catch (generateError) {
-      setError(generateError instanceof Error ? generateError.message : '生成卡圖失敗。')
+      setError(generateError instanceof Error ? generateError.message : 'AI 生圖失敗。')
     } finally {
       setGeneratingCard(false)
       setGeneratingCardId(null)
@@ -469,42 +440,20 @@ export default function TeacherCardsPage() {
 
       await loadCards()
       await loadAiImageStatus()
-      setMessage(data?.message ?? `已為卡片「${card.name}」生成圖片。`)
+      setMessage(data?.message ?? `已重新生成「${card.name}」的卡圖。`)
     } catch (generateError) {
-      setError(generateError instanceof Error ? generateError.message : '生成卡圖失敗。')
+      setError(generateError instanceof Error ? generateError.message : 'AI 生圖失敗。')
     } finally {
       setGeneratingCard(false)
       setGeneratingCardId(null)
     }
   }
 
-  function beginEditAlbum(album: CardAlbum) {
-    setEditingAlbumId(album.id)
-    setAlbumForm(mapAlbumToForm(album))
-    setMessage(`正在編輯分集冊「${album.name}」。`)
-    setError(null)
-  }
-
   function beginEditCard(card: CardWithAlbum) {
     setEditingCardId(card.id)
     setCardForm(mapCardToForm(card))
-    setMessage(`正在編輯卡片「${card.name}」。`)
+    setMessage(`正在編輯卡牌「${card.name}」。`)
     setError(null)
-  }
-
-  async function toggleAlbumActive(album: CardAlbum) {
-    setMessage(null)
-    setError(null)
-
-    const { error } = await supabase.from('card_albums').update({ is_active: !album.is_active }).eq('id', album.id)
-
-    if (error) {
-      setError(error.message)
-      return
-    }
-
-    setMessage(album.is_active ? `已停用分集冊「${album.name}」。` : `已啟用分集冊「${album.name}」。`)
-    await loadAlbums()
   }
 
   async function toggleCardActive(card: CardWithAlbum) {
@@ -518,7 +467,7 @@ export default function TeacherCardsPage() {
       return
     }
 
-    setMessage(card.is_active ? `已停用卡片「${card.name}」。` : `已啟用卡片「${card.name}」。`)
+    setMessage(card.is_active ? `已停用卡牌「${card.name}」。` : `已啟用卡牌「${card.name}」。`)
     await loadCards()
   }
 
@@ -526,142 +475,31 @@ export default function TeacherCardsPage() {
     <div className="space-y-6">
       <div>
         <div className="mb-2 flex justify-end">
-          <span className="rounded-full border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs text-slate-300">
-            版本 {appVersion}
-          </span>
+          <span className="rounded-full border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs text-slate-300">版本 {appVersion}</span>
         </div>
-        <h1 className="text-2xl font-bold text-white">卡牌與分集冊管理</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          教師可建立分集冊、維護卡片資料，並利用 AI 依固定風格生成卡圖。
-        </p>
+        <h1 className="text-2xl font-bold text-white">卡牌管理</h1>
+        <p className="mt-1 text-sm text-slate-400">這一頁只專心處理卡牌本身。分集冊設定已拆到另一頁，新增多張卡會順很多。</p>
       </div>
+
+      <TeacherCardManagementTabs />
 
       {message ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{message}</div> : null}
       {error ? <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
 
-      <section className="space-y-4 rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
-            <BookOpen size={18} className="text-indigo-300" />
-            {editingAlbumId ? '編輯分集冊' : '建立分集冊'}
-          </h2>
-          {editingAlbumId ? (
-            <button
-              type="button"
-              onClick={resetAlbumForm}
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
-            >
-              <X size={16} />
-              取消編輯
-            </button>
-          ) : null}
+      {!hasAlbums ? (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+          目前還沒有分集冊。請先到「分集冊設定」建立至少一個分集冊，再回來新增卡牌。
         </div>
-
-        <form onSubmit={saveAlbum} className="grid gap-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2">
-              <span className="text-sm text-slate-300">分集冊名稱</span>
-              <input
-                value={albumForm.name}
-                onChange={event => setAlbumForm({ ...albumForm, name: event.target.value })}
-                required
-                className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
-              />
-            </label>
-
-            <label className="space-y-2">
-              <span className="text-sm text-slate-300">封面主色</span>
-              <input
-                value={albumForm.cover_color}
-                onChange={event => setAlbumForm({ ...albumForm, cover_color: event.target.value })}
-                placeholder="#334155"
-                className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
-              />
-            </label>
-
-            <label className="space-y-2 md:col-span-2">
-              <span className="text-sm text-slate-300">分集冊說明</span>
-              <textarea
-                value={albumForm.description}
-                onChange={event => setAlbumForm({ ...albumForm, description: event.target.value })}
-                rows={3}
-                className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
-              />
-            </label>
-          </div>
-
-          <label className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={albumForm.is_active}
-              onChange={event => setAlbumForm({ ...albumForm, is_active: event.target.checked })}
-              className="accent-indigo-500"
-            />
-            這本分集冊目前開放使用
-          </label>
-
-          <button
-            type="submit"
-            disabled={savingAlbum}
-            className="inline-flex w-fit items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            <Save size={16} />
-            {savingAlbum ? '儲存中...' : editingAlbumId ? '更新分集冊' : '建立分集冊'}
-          </button>
-        </form>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {albums.map(album => (
-            <div key={album.id} className="space-y-3 rounded-2xl border border-slate-700 bg-slate-900/50 p-4">
-              <div className="rounded-2xl p-4 text-white" style={{ backgroundColor: album.cover_color }}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold">{album.name}</p>
-                    <p className="mt-1 text-sm text-white/85">{album.description || '尚未填寫分集冊說明。'}</p>
-                  </div>
-                  <span className={`rounded-full px-2 py-1 text-xs ${album.is_active ? 'bg-emerald-600/25 text-emerald-50' : 'bg-black/20 text-white/75'}`}>
-                    {album.is_active ? '啟用中' : '已停用'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => beginEditAlbum(album)}
-                  className="inline-flex items-center gap-2 rounded-lg bg-amber-600/20 px-3 py-2 text-sm text-amber-300 hover:bg-amber-600/30"
-                >
-                  <Pencil size={16} />
-                  編輯
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleAlbumActive(album)}
-                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
-                    album.is_active
-                      ? 'bg-rose-600/20 text-rose-300 hover:bg-rose-600/30'
-                      : 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30'
-                  }`}
-                >
-                  {album.is_active ? <PowerOff size={16} /> : <Power size={16} />}
-                  {album.is_active ? '停用' : '啟用'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      ) : null}
 
       <section className="space-y-4 rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
               {editingCardId ? <Pencil size={18} className="text-amber-300" /> : <Plus size={18} className="text-indigo-300" />}
-              {editingCardId ? '編輯卡片' : '建立卡片'}
+              {editingCardId ? '編輯卡牌' : '建立卡牌'}
             </h2>
-            <p className="mt-1 text-sm text-slate-400">
-              先儲存卡片，再用 AI 依分集冊主題與提示詞生成圖片。
-            </p>
+            <p className="mt-1 text-sm text-slate-400">建立完成後，表單會保留在新增模式，方便你連續做下一張。</p>
           </div>
           {editingCardId ? (
             <button
@@ -670,7 +508,7 @@ export default function TeacherCardsPage() {
               className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600"
             >
               <X size={16} />
-              取消編輯
+              建立新卡牌
             </button>
           ) : null}
         </div>
@@ -679,7 +517,7 @@ export default function TeacherCardsPage() {
           <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-2">
-                <span className="text-sm text-slate-300">卡片名稱</span>
+                <span className="text-sm text-slate-300">卡牌名稱</span>
                 <input
                   value={cardForm.name}
                   onChange={event => setCardForm({ ...cardForm, name: event.target.value })}
@@ -721,7 +559,7 @@ export default function TeacherCardsPage() {
               </label>
 
               <label className="space-y-2">
-                <span className="text-sm text-slate-300">卡片主色</span>
+                <span className="text-sm text-slate-300">卡牌主色</span>
                 <input
                   value={cardForm.color}
                   onChange={event => setCardForm({ ...cardForm, color: event.target.value })}
@@ -731,7 +569,7 @@ export default function TeacherCardsPage() {
               </label>
 
               <label className="space-y-2 md:col-span-2">
-                <span className="text-sm text-slate-300">卡片說明</span>
+                <span className="text-sm text-slate-300">卡牌說明</span>
                 <textarea
                   value={cardForm.description}
                   onChange={event => setCardForm({ ...cardForm, description: event.target.value })}
@@ -760,9 +598,25 @@ export default function TeacherCardsPage() {
                 <input
                   value={cardForm.image_url}
                   onChange={event => setCardForm({ ...cardForm, image_url: event.target.value })}
-                  placeholder="可手動貼上圖片網址，或使用 AI 自動生成"
+                  placeholder="已有圖片時可直接貼網址"
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
                 />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">上傳照片</span>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600 bg-slate-900 px-4 py-3 text-sm text-slate-200 hover:border-indigo-400 hover:text-white">
+                  <Upload size={16} />
+                  {uploadingImage ? '上傳中...' : '選擇卡牌圖片'}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={event => void handleCardImageUpload(event)}
+                    disabled={uploadingImage}
+                    className="hidden"
+                  />
+                </label>
+                <p className="text-xs text-slate-500">支援 PNG、JPG、WEBP，大小上限 5 MB。</p>
               </label>
 
               <label className="space-y-2 md:col-span-2">
@@ -771,7 +625,7 @@ export default function TeacherCardsPage() {
                   value={cardForm.image_prompt}
                   onChange={event => setCardForm({ ...cardForm, image_prompt: event.target.value })}
                   rows={3}
-                  placeholder="例如：晨光中的校門、背著書包的學生、星星徽章、藍金配色"
+                  placeholder="補充主體、場景、動作、畫面重點，幫 AI 更貼近你要的卡圖。"
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
                 />
               </label>
@@ -783,22 +637,19 @@ export default function TeacherCardsPage() {
                 卡片預覽
               </div>
 
-              <div
-                className="aspect-[3/4] overflow-hidden rounded-2xl border border-white/10 shadow-lg"
-                style={{ backgroundColor: cardForm.color || '#334155' }}
-              >
+              <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-white/10 shadow-lg" style={{ backgroundColor: cardForm.color || '#334155' }}>
                 {cardForm.image_url ? (
-                  <img src={cardForm.image_url} alt={cardForm.name || '卡片預覽'} className="h-full w-full object-cover" />
+                  <img src={cardForm.image_url} alt={cardForm.name || '卡牌預覽'} className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full flex-col justify-between bg-black/10 p-4 text-white">
                     <div className="flex items-start justify-between gap-2">
                       <span className="rounded-full bg-black/20 px-2 py-1 text-xs">{formatRarityLabel(cardForm.rarity)}</span>
-                      <span className="rounded-full bg-black/20 px-2 py-1 text-xs">{cardForm.is_active ? '啟用中' : '停用中'}</span>
+                      <span className="rounded-full bg-black/20 px-2 py-1 text-xs">{cardForm.is_active ? '啟用中' : '已停用'}</span>
                     </div>
                     <div>
-                      <p className="text-xl font-bold">{cardForm.name || '未命名卡片'}</p>
+                      <p className="text-xl font-bold">{cardForm.name || '尚未命名卡牌'}</p>
                       <p className="mt-1 text-sm text-white/80">
-                        {albums.find(album => album.id === cardForm.album_id)?.name ?? '尚未選擇分集冊'}
+                        {albums.find(album => album.id === cardForm.album_id)?.name ?? '請先選擇分集冊'}
                       </p>
                     </div>
                   </div>
@@ -806,7 +657,7 @@ export default function TeacherCardsPage() {
               </div>
 
               <div className="mt-4 space-y-2 rounded-xl border border-slate-700 bg-slate-800/70 p-3 text-sm text-slate-300">
-                <p>AI 會自動參考：卡片名稱、稀有度、分集冊主題、主色與你的補充提示詞。</p>
+                <p>AI 會參考卡牌名稱、稀有度、分集冊、風格模板與你的補充提示詞來生成卡圖。</p>
                 <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
                   <div className="flex items-center gap-2 text-sm font-medium text-white">
                     <KeyRound size={16} className="text-fuchsia-300" />
@@ -834,27 +685,23 @@ export default function TeacherCardsPage() {
                         type="password"
                         value={teacherApiKey}
                         onChange={event => setTeacherApiKey(event.target.value)}
-                        placeholder="留空時使用系統 Secret"
+                        placeholder="輸入你自己的金鑰"
                         autoComplete="off"
                         spellCheck={false}
                         className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
                       />
                     </label>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    這個 key 只暫存在目前頁面，不會寫入資料庫；按下生成時會送到 Edge Function 呼叫圖片 API。
-                  </p>
+                  <p className="text-xs text-slate-500">這把 key 只會在這次操作傳到 Edge Function，不會直接寫進資料庫。</p>
                 </div>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className={aiImageStatus?.ready ? 'text-emerald-200' : 'text-amber-200'}>
                       {aiImageStatus?.ready
                         ? `目前使用 ${aiImageStatus.provider_label}：${aiImageStatus.model}${aiImageStatus.key_source === 'teacher' ? '（教師自備 key）' : '（系統 Secret）'}`
-                        : `尚未設定圖片 API Secret：${aiImageStatus?.missing_secret ?? '檢查中'}`}
+                        : `尚未完成 AI 圖片設定：${aiImageStatus?.missing_secret ?? '請檢查設定'}`}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      可在此輸入教師自己的 key，或在 Supabase Edge Function Secrets 設定 `AI_IMAGE_PROVIDER`、`GEMINI_API_KEY` 或 `OPENAI_API_KEY`。
-                    </p>
+                    <p className="mt-1 text-xs text-slate-500">若未提供教師自備 key，系統會改用 Supabase Edge Function 內設定好的預設金鑰。</p>
                   </div>
                   <button
                     type="button"
@@ -874,7 +721,7 @@ export default function TeacherCardsPage() {
                     className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-900/40 px-3 py-2 text-xs text-fuchsia-200 hover:bg-fuchsia-900/60 disabled:opacity-50"
                   >
                     {probingAiImage ? <Sparkles size={14} className="animate-pulse" /> : <Wand2 size={14} />}
-                    {probingAiImage ? '診斷中...' : '診斷連線'}
+                    {probingAiImage ? '檢查中...' : '測試生圖'}
                   </button>
                 </div>
                 {aiDiagnostics ? (
@@ -905,28 +752,28 @@ export default function TeacherCardsPage() {
                 onChange={event => setCardForm({ ...cardForm, is_active: event.target.checked })}
                 className="accent-indigo-500"
               />
-              啟用這張卡片
+              啟用這張卡牌
             </label>
           </div>
 
           <div className="flex flex-wrap gap-3">
             <button
               type="submit"
-              disabled={savingCard}
+              disabled={savingCard || !hasAlbums}
               className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             >
               <Save size={16} />
-              {savingCard ? '儲存中...' : editingCardId ? '更新卡片' : '建立卡片'}
+              {savingCard ? '儲存中...' : editingCardId ? '更新卡牌' : '建立卡牌'}
             </button>
 
             <button
               type="button"
               onClick={generateCardImage}
-              disabled={savingCard || generatingCard || !cardForm.name.trim() || !cardForm.album_id || !canUseAiImage}
+              disabled={savingCard || generatingCard || !cardForm.name.trim() || !cardForm.album_id || !canUseAiImage || !hasAlbums}
               className="inline-flex items-center gap-2 rounded-xl bg-fuchsia-600 px-5 py-3 font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50"
             >
               {generatingCard ? <Sparkles size={16} className="animate-pulse" /> : <Wand2 size={16} />}
-              {generatingCard ? 'AI 生成中...' : editingCardId ? '重新生成卡圖' : '建立並生成卡圖'}
+              {generatingCard ? 'AI 生圖中...' : editingCardId ? '更新並生成卡圖' : '建立並生成卡圖'}
             </button>
           </div>
         </form>
@@ -953,7 +800,30 @@ export default function TeacherCardsPage() {
         ))}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <section className="rounded-2xl bg-slate-800 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="font-semibold text-white">卡牌大小</h2>
+            <p className="mt-1 text-sm text-slate-400">拖曳滑桿，調整下方卡牌清單的顯示大小。</p>
+          </div>
+          <div className="flex items-center gap-3 lg:min-w-[320px]">
+            <span className="text-xs text-slate-400">小</span>
+            <input
+              type="range"
+              min={CARD_SCALE_MIN}
+              max={CARD_SCALE_MAX}
+              step={10}
+              value={cardScale}
+              onChange={event => setCardScale(clampNumber(Number(event.target.value), CARD_SCALE_MIN, CARD_SCALE_MAX))}
+              className="h-2 w-full cursor-pointer accent-indigo-500"
+            />
+            <span className="text-xs text-slate-400">大</span>
+            <span className="w-12 text-right text-sm text-slate-300">{cardScale}%</span>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardGridMinWidth}px, 1fr))` }}>
         {filteredCards.map(card => (
           <div key={card.id} className="overflow-hidden rounded-2xl border border-slate-700 bg-slate-800/70">
             <div className="aspect-[3/4]" style={{ backgroundColor: card.color || '#334155' }}>
@@ -981,10 +851,10 @@ export default function TeacherCardsPage() {
                   <p className="font-semibold text-white">{card.name}</p>
                   <span className="rounded-full bg-slate-900 px-2 py-1 text-xs text-slate-300">{formatRarityLabel(card.rarity)}</span>
                 </div>
-                <p className="mt-1 text-sm text-slate-400">{card.description || '尚未填寫卡片說明。'}</p>
+                <p className="mt-1 text-sm text-slate-400">{card.description || '尚未填寫卡牌說明。'}</p>
                 <p className="mt-2 text-xs text-slate-500">
                   分集冊：{card.album?.name ?? card.series}
-                  {card.image_style ? ` · 風格：${card.image_style}` : ''}
+                  {card.image_style ? ` | 風格：${card.image_style}` : ''}
                 </p>
               </div>
 
@@ -1005,12 +875,12 @@ export default function TeacherCardsPage() {
                   className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-600/20 px-3 py-2 text-sm text-fuchsia-300 hover:bg-fuchsia-600/30 disabled:opacity-50"
                 >
                   <Wand2 size={16} />
-                  {generatingCard && generatingCardId === card.id ? '生成中...' : 'AI 生圖'}
+                  {generatingCard && generatingCardId === card.id ? '生圖中...' : 'AI 生圖'}
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => toggleCardActive(card)}
+                  onClick={() => void toggleCardActive(card)}
                   className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
                     card.is_active
                       ? 'bg-rose-600/20 text-rose-300 hover:bg-rose-600/30'

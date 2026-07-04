@@ -9,11 +9,11 @@ const DEFAULT_IMAGE_STYLE = 'Q版校園奇幻'
 
 const STYLE_PROMPTS: Record<string, string> = {
   [DEFAULT_IMAGE_STYLE]:
-    'Create a polished chibi fantasy campus illustration with bright lighting, clear silhouette, collectible-card friendly composition, soft depth, clean outlines, and a premium mobile game reward feeling.',
-  '校徽 / 徽章式收藏卡風':
-    'Create a clean badge-style collectible illustration inspired by school crests and medal emblems, centered composition, elegant decorative framing, readable shapes, and premium collectible card presentation.',
-  '卡牌外框收藏卡風':
-    'Create a polished collectible trading-card illustration with a visible decorative card frame around all four edges, premium printed-card styling, readable central artwork, layered border accents, and a refined fantasy campus mobile game feel.',
+    'Create a polished chibi fantasy campus illustration with bright lighting, clear silhouette, soft depth, and a premium collectible mobile game feeling.',
+  '日系動漫插畫':
+    'Create a clean anime illustration with readable composition, expressive lighting, refined details, and a premium game reward presentation.',
+  '紙牌卡框風格':
+    'Create a polished collectible trading-card illustration with a visible decorative frame on all four edges and premium printed-card styling.',
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -21,6 +21,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   gemini: 'Google Gemini',
   huggingface: 'Hugging Face',
 }
+
+type TargetType = 'card' | 'equipment' | 'profession'
 
 type CardRow = {
   id: string
@@ -36,97 +38,65 @@ type CardRow = {
   color: string | null
 }
 
-const LOCATION_KEYWORDS = ['場', '室', '館', '樓', '台', '站', '院', '廳', '園', '校門', '操場', '球場', '跑道', '教室', '圖書館'] as const
-const OBJECT_KEYWORDS = ['卡', '徽章', '獎盃', '裝備', '道具', '球', '書', '證書', '旗', '印章'] as const
+type EquipmentRow = {
+  id: string
+  name: string
+  rarity: string
+  description: string | null
+  slot_type: string
+  image_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+}
 
-const SUBJECT_HINTS: Array<{ match: string; hint: string }> = [
-  { match: '排球場', hint: 'volleyball court' },
-  { match: '籃球場', hint: 'basketball court' },
-  { match: '足球場', hint: 'soccer field' },
-  { match: '棒球場', hint: 'baseball field' },
-  { match: '操場', hint: 'school athletic field and running track' },
-  { match: '圖書館', hint: 'school library interior' },
-  { match: '教室', hint: 'classroom interior' },
-  { match: '校門', hint: 'school gate entrance' },
-  { match: '體育館', hint: 'school gymnasium interior' },
-  { match: '舞台', hint: 'school stage performance area' },
-  { match: '實驗室', hint: 'school science laboratory' },
-  { match: '游泳池', hint: 'school swimming pool' },
-  { match: '樂器', hint: 'musical instrument' },
-  { match: '獎盃', hint: 'trophy award object' },
-  { match: '徽章', hint: 'badge emblem object' },
-]
+type ProfessionRow = {
+  id: string
+  name: string
+  code: string
+  description: string | null
+  theme_color: string | null
+  icon_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+  unlock_tier: number
+}
+
+type GenerationSuccess = {
+  base64Image: string
+  mimeType: string
+  modelUsed?: string
+  debug?: string | null
+}
+
+type GenerationFailure = {
+  error: string
+  status: number
+  modelUsed?: string
+  debug?: string | null
+}
+
+function jsonResponse(payload: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+function debugSummary(value: unknown, maxLength = 700) {
+  try {
+    const text = JSON.stringify(value)
+    if (!text) return null
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+  } catch {
+    return null
+  }
+}
 
 function slugify(value: string) {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-}
-
-function detectSubjectKind(name: string) {
-  if (LOCATION_KEYWORDS.some(keyword => name.includes(keyword))) return 'location'
-  if (OBJECT_KEYWORDS.some(keyword => name.includes(keyword))) return 'object'
-  return 'character'
-}
-
-function buildSubjectHints(name: string, imagePrompt: string | null) {
-  const combined = `${name} ${imagePrompt ?? ''}`
-  return SUBJECT_HINTS.filter(entry => combined.includes(entry.match)).map(entry => entry.hint)
-}
-
-function buildPrompt(card: CardRow, albumName: string | null, imageStyle: string, imagePrompt: string | null) {
-  const stylePrompt = STYLE_PROMPTS[imageStyle] ?? STYLE_PROMPTS[DEFAULT_IMAGE_STYLE]
-  const albumLabel = albumName ?? card.series ?? '校園收藏卡'
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without changing the main subject: ${imagePrompt.trim()}`
-    : ''
-  const description = card.description?.trim() ? `Card description: ${card.description.trim()}` : ''
-  const isFrameStyle = imageStyle === '卡牌外框收藏卡風'
-  const subjectKind = detectSubjectKind(card.name)
-  const subjectHints = buildSubjectHints(card.name, imagePrompt)
-  const compositionGuardrail = isFrameStyle
-    ? 'Render the result as a complete trading card face with a visible border frame on all four edges.'
-    : 'Fill the image with the main scene and do not add a card border or printed frame.'
-  const negativePrompt = isFrameStyle
-    ? 'Avoid text, watermarks, UI, speech bubbles, readable letters, name plates, and subtitles inside the artwork.'
-    : 'Avoid text, watermarks, UI, speech bubbles, readable letters, and borders inside the illustration.'
-  const subjectInstruction =
-    subjectKind === 'location'
-      ? 'This is a location card. The image must depict the place itself as the main subject, using a wide or medium-wide scene composition. Do not make a single-character portrait the main image.'
-      : subjectKind === 'object'
-        ? 'This is an object card. The image must depict the named item or symbol itself as the main subject, not a person holding it unless the object still dominates the composition.'
-        : 'This is a character card. The named character should be the main subject.'
-  const peopleRule =
-    subjectKind === 'location'
-      ? 'If people appear, they must be small supporting figures inside the scene, such as students playing on the court, and the place must remain the dominant subject.'
-      : subjectKind === 'object'
-        ? 'If people appear, they must be secondary and clearly support the named object.'
-        : 'If other props or scenery appear, they must support the named character.'
-  const englishHints = subjectHints.length > 0 ? `English subject hints: ${subjectHints.join(', ')}.` : ''
-
-  return [
-    stylePrompt,
-    `Design artwork for a school collectible card.`,
-    `The primary subject of this card must be "${card.name}".`,
-    `Card name: ${card.name}.`,
-    `Album or collection theme: ${albumLabel}.`,
-    `Card rarity: ${card.rarity}.`,
-    `Main accent color: ${card.color ?? '#334155'}.`,
-    'Treat any additional teacher direction as supporting detail only. It must not replace the named primary subject.',
-    subjectInstruction,
-    peopleRule,
-    englishHints,
-    compositionGuardrail,
-    description,
-    customPrompt,
-    negativePrompt,
-    'Focus on one clear subject that matches the album theme and feels suitable for a campus card game.',
-    'Make the main subject obvious at first glance.',
-    'Do not generate unrelated random anime girls when the named subject is a place or object.',
-  ]
-    .filter(Boolean)
-    .join(' ')
 }
 
 function decodeBase64Image(value: string) {
@@ -153,21 +123,10 @@ function encodeModelPath(model: string) {
     .join('/')
 }
 
-function jsonResponse(payload: Record<string, unknown>, status = 200) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  })
-}
-
-function debugSummary(value: unknown, maxLength = 700) {
-  try {
-    const text = JSON.stringify(value)
-    if (!text) return null
-    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
-  } catch {
-    return null
-  }
+function getImageExtension(mimeType: string) {
+  if (mimeType === 'image/jpeg') return 'jpg'
+  if (mimeType === 'image/webp') return 'webp'
+  return 'png'
 }
 
 function normalizeProvider(value: string | null) {
@@ -175,18 +134,16 @@ function normalizeProvider(value: string | null) {
   return provider === 'gemini' || provider === 'openai' || provider === 'huggingface' ? provider : 'auto'
 }
 
+function normalizeTargetType(value: unknown): TargetType {
+  const targetType = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (targetType === 'equipment' || targetType === 'profession') return targetType
+  return 'card'
+}
+
 function resolveImageProvider(openAiApiKey: string, geminiApiKey: string, huggingFaceApiKey: string, configuredProvider: string) {
-  if (configuredProvider === 'openai') {
-    return openAiApiKey ? 'openai' : null
-  }
-
-  if (configuredProvider === 'gemini') {
-    return geminiApiKey ? 'gemini' : null
-  }
-
-  if (configuredProvider === 'huggingface') {
-    return huggingFaceApiKey ? 'huggingface' : null
-  }
+  if (configuredProvider === 'openai') return openAiApiKey ? 'openai' : null
+  if (configuredProvider === 'gemini') return geminiApiKey ? 'gemini' : null
+  if (configuredProvider === 'huggingface') return huggingFaceApiKey ? 'huggingface' : null
 
   if (geminiApiKey) return 'gemini'
   if (openAiApiKey) return 'openai'
@@ -198,7 +155,81 @@ function resolveRequestProvider(provider: string, apiKey: string) {
   return apiKey && (provider === 'gemini' || provider === 'openai' || provider === 'huggingface') ? provider : null
 }
 
-async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: string) {
+function getStylePrompt(imageStyle: string) {
+  return STYLE_PROMPTS[imageStyle] ?? STYLE_PROMPTS[DEFAULT_IMAGE_STYLE]
+}
+
+function buildCardPrompt(card: CardRow, albumName: string | null, imageStyle: string, imagePrompt: string | null) {
+  const stylePrompt = getStylePrompt(imageStyle)
+  const customPrompt = imagePrompt?.trim()
+    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
+    : ''
+  const description = card.description?.trim() ? `Card description: ${card.description.trim()}` : ''
+  const albumLabel = albumName ?? card.series ?? 'Campus Collection'
+
+  return [
+    stylePrompt,
+    'Design artwork for a school collectible card.',
+    `The primary subject of this card must be "${card.name}".`,
+    `Album or collection theme: ${albumLabel}.`,
+    `Card rarity: ${card.rarity}.`,
+    `Main accent color: ${card.color ?? '#334155'}.`,
+    description,
+    customPrompt,
+    'Keep the named subject obvious at first glance.',
+    'Avoid text, watermarks, UI, and unrelated random portrait subjects.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function buildEquipmentPrompt(equipment: EquipmentRow, imageStyle: string, imagePrompt: string | null) {
+  const stylePrompt = getStylePrompt(imageStyle)
+  const customPrompt = imagePrompt?.trim()
+    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
+    : ''
+  const description = equipment.description?.trim() ? `Equipment description: ${equipment.description.trim()}` : ''
+
+  return [
+    stylePrompt,
+    'Design artwork for a school collectible equipment item.',
+    `The equipment named "${equipment.name}" must be the main subject.`,
+    `Equipment slot: ${equipment.slot_type}.`,
+    `Equipment rarity: ${equipment.rarity}.`,
+    description,
+    customPrompt,
+    'The item itself must dominate the composition.',
+    'If a character appears, they must remain secondary to the equipment.',
+    'Avoid text, watermarks, UI, and unrelated random portraits.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function buildProfessionPrompt(profession: ProfessionRow, imageStyle: string, imagePrompt: string | null) {
+  const stylePrompt = getStylePrompt(imageStyle)
+  const customPrompt = imagePrompt?.trim()
+    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
+    : ''
+  const description = profession.description?.trim() ? `Profession description: ${profession.description.trim()}` : ''
+
+  return [
+    stylePrompt,
+    'Design artwork for a fantasy school profession or class.',
+    `The profession named "${profession.name}" must be represented clearly as the main subject.`,
+    `Profession code: ${profession.code}.`,
+    `Theme color: ${profession.theme_color ?? '#6366f1'}.`,
+    `Unlock tier: ${profession.unlock_tier}.`,
+    description,
+    customPrompt,
+    'The result should work as a polished profession icon or portrait for a mobile game selection screen.',
+    'Avoid text, watermarks, UI, and unrelated subjects.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: string): Promise<GenerationSuccess | GenerationFailure> {
   const imageResponse = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: {
@@ -214,19 +245,23 @@ async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: 
 
   const imagePayload = await imageResponse.json()
   if (!imageResponse.ok) {
-    const message = imagePayload?.error?.message ?? 'OpenAI 生成卡圖失敗。'
-    return { error: message, status: imageResponse.status, modelUsed: model, debug: debugSummary(imagePayload) }
+    return {
+      error: imagePayload?.error?.message ?? 'OpenAI image generation failed.',
+      status: imageResponse.status,
+      modelUsed: model,
+      debug: debugSummary(imagePayload),
+    }
   }
 
   const base64Image = imagePayload?.data?.[0]?.b64_json
   if (!base64Image || typeof base64Image !== 'string') {
-    return { error: 'OpenAI 沒有回傳可用的圖片資料。', status: 502 }
+    return { error: 'OpenAI did not return image data.', status: 502, modelUsed: model }
   }
 
-  return { base64Image, mimeType: 'image/png' }
+  return { base64Image, mimeType: 'image/png', modelUsed: model }
 }
 
-async function generateHuggingFaceImage(prompt: string, huggingFaceApiKey: string, model: string) {
+async function generateHuggingFaceImage(prompt: string, huggingFaceApiKey: string, model: string): Promise<GenerationSuccess | GenerationFailure> {
   const modelPath = encodeModelPath(model)
   const imageResponse = await fetch(`https://router.huggingface.co/hf-inference/models/${modelPath}`, {
     method: 'POST',
@@ -265,24 +300,15 @@ async function generateHuggingFaceImage(prompt: string, huggingFaceApiKey: strin
   }
 
   const imageBytes = new Uint8Array(await imageResponse.arrayBuffer())
-  const base64Image = encodeBase64Image(imageBytes)
-  const mimeType = contentType.split(';')[0] || 'image/png'
-
   return {
-    base64Image,
-    mimeType,
+    base64Image: encodeBase64Image(imageBytes),
+    mimeType: contentType.split(';')[0] || 'image/png',
     modelUsed: model,
     debug: debugSummary({ contentType, bytes: imageBytes.byteLength }),
   }
 }
 
-function getImageExtension(mimeType: string) {
-  if (mimeType === 'image/jpeg') return 'jpg'
-  if (mimeType === 'image/webp') return 'webp'
-  return 'png'
-}
-
-async function generateGeminiImage(prompt: string, geminiApiKey: string, model: string) {
+async function generateGeminiImage(prompt: string, geminiApiKey: string, model: string): Promise<GenerationSuccess | GenerationFailure> {
   const requestBody = {
     model,
     input: [{ type: 'text', text: prompt }],
@@ -307,18 +333,14 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
         'x-goog-api-key': geminiApiKey,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        ...requestBody,
-        model: attemptedModel,
-      }),
+      body: JSON.stringify({ ...requestBody, model: attemptedModel }),
     })
     imagePayload = await imageResponse.json()
   }
 
   if (!imageResponse.ok) {
-    const message = imagePayload?.error?.message ?? 'Gemini 生成卡圖失敗。'
     return {
-      error: message,
+      error: imagePayload?.error?.message ?? 'Gemini image generation failed.',
       status: imageResponse.status,
       modelUsed: attemptedModel,
       debug: debugSummary(imagePayload),
@@ -333,7 +355,7 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
         (step: {
           content?: Array<{ type?: string; data?: string; mime_type?: string }>
           summary?: Array<{ type?: string; data?: string; mime_type?: string }>
-        }) => [...(step?.content ?? []), ...(step?.summary ?? [])],
+        }) => [...(step?.content ?? []), ...(step?.summary ?? [])]
       )
       ?.find?.((item: { type?: string; data?: string; mime_type?: string }) => item?.type === 'image')
   const base64Image = outputImage?.data ?? fallbackImage?.data
@@ -378,7 +400,7 @@ Deno.serve(async request => {
     const authHeader = request.headers.get('Authorization') ?? ''
 
     if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
-      throw new Error('Supabase Edge Function 缺少必要環境變數。')
+      throw new Error('Supabase Edge Function is missing required environment variables.')
     }
 
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -392,10 +414,7 @@ Deno.serve(async request => {
     } = await userClient.auth.getUser()
 
     if (authError || !user) {
-      return new Response(JSON.stringify({ error: '請先登入教師或管理者帳號。' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: 'Authentication required.' }, 401)
     }
 
     const { data: actorProfile, error: actorError } = await adminClient
@@ -405,18 +424,26 @@ Deno.serve(async request => {
       .maybeSingle()
 
     if (actorError || !actorProfile || !['teacher', 'admin'].includes(actorProfile.role)) {
-      return jsonResponse({ error: '只有教師或管理者可以生成卡圖。' }, 403)
+      return jsonResponse({ error: 'Teacher or admin permission is required.' }, 403)
     }
 
-    const { cardId, imagePrompt, imageStyle, action, aiProvider, apiKey } = await request.json()
-    const requestProvider = normalizeProvider(typeof aiProvider === 'string' ? aiProvider : null)
-    const requestApiKey = typeof apiKey === 'string' ? apiKey.trim() : ''
+    const body = await request.json()
+    const action = typeof body.action === 'string' ? body.action : null
+    const normalizedTargetType = normalizeTargetType(body.targetType)
+    const resolvedTargetId =
+      typeof body.targetId === 'string' && body.targetId.trim()
+        ? body.targetId.trim()
+        : typeof body.cardId === 'string' && body.cardId.trim()
+          ? body.cardId.trim()
+          : ''
+    const requestProvider = normalizeProvider(typeof body.aiProvider === 'string' ? body.aiProvider : null)
+    const requestApiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
     const personalProvider = resolveRequestProvider(requestProvider, requestApiKey)
     const systemProvider = resolveImageProvider(
       systemOpenAiApiKey,
       systemGeminiApiKey,
       systemHuggingFaceApiKey,
-      configuredProvider,
+      configuredProvider
     )
     const activeProvider = personalProvider ?? systemProvider
     const openAiApiKey = personalProvider === 'openai' ? requestApiKey : systemOpenAiApiKey
@@ -429,18 +456,22 @@ Deno.serve(async request => {
         configured_provider: configuredProvider,
         active_provider: activeProvider,
         provider_label: activeProvider ? PROVIDER_LABELS[activeProvider] : null,
-        model: activeProvider === 'gemini' ? geminiModel : activeProvider === 'openai' ? openAiModel : activeProvider === 'huggingface' ? huggingFaceModel : null,
-        has_openai_key: Boolean(systemOpenAiApiKey),
-        has_gemini_key: Boolean(systemGeminiApiKey),
-        has_huggingface_key: Boolean(systemHuggingFaceApiKey),
-        key_source: keySource,
+        model:
+          activeProvider === 'gemini'
+            ? geminiModel
+            : activeProvider === 'openai'
+              ? openAiModel
+              : activeProvider === 'huggingface'
+                ? huggingFaceModel
+                : null,
         missing_secret:
           configuredProvider === 'gemini'
             ? 'GEMINI_API_KEY'
             : configuredProvider === 'openai'
               ? 'OPENAI_API_KEY'
-            : 'OPENAI_API_KEY 或 GEMINI_API_KEY',
+              : 'OPENAI_API_KEY or GEMINI_API_KEY',
         ready: Boolean(activeProvider),
+        key_source: keySource,
       })
     }
 
@@ -449,14 +480,10 @@ Deno.serve(async request => {
         {
           error:
             requestApiKey && !personalProvider
-              ? '使用教師自備 API key 時，請先選擇 OpenAI 或 Gemini。'
-              : configuredProvider === 'gemini'
-                ? '尚未設定 GEMINI_API_KEY；可由教師在頁面輸入自己的 Gemini key，或先在 Supabase Edge Function Secrets 中加入。'
-                : configuredProvider === 'openai'
-                  ? '尚未設定 OPENAI_API_KEY；可由教師在頁面輸入自己的 OpenAI key，或先在 Supabase Edge Function Secrets 中加入。'
-                  : '尚未設定圖片 API 金鑰；可由教師在頁面輸入自己的 key，或在 Supabase Edge Function Secrets 加入 GEMINI_API_KEY / OPENAI_API_KEY。',
+              ? 'The provided API key does not match a supported provider.'
+              : 'No AI image provider is configured.',
         },
-        400,
+        400
       )
     }
 
@@ -475,46 +502,101 @@ Deno.serve(async request => {
             error: probeResult.error,
             diagnostics: {
               provider: activeProvider,
-              model: probeResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : activeProvider === 'huggingface' ? huggingFaceModel : openAiModel),
+              model:
+                probeResult.modelUsed ??
+                (activeProvider === 'gemini'
+                  ? geminiModel
+                  : activeProvider === 'huggingface'
+                    ? huggingFaceModel
+                    : openAiModel),
               status: probeResult.status,
               debug: probeResult.debug ?? null,
             },
           },
-          200,
+          200
         )
       }
 
       return jsonResponse({
         ok: true,
         provider: activeProvider,
-        model: probeResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : activeProvider === 'huggingface' ? huggingFaceModel : openAiModel),
+        model:
+          probeResult.modelUsed ??
+          (activeProvider === 'gemini'
+            ? geminiModel
+            : activeProvider === 'huggingface'
+              ? huggingFaceModel
+              : openAiModel),
         diagnostics: probeResult.debug ?? null,
       })
     }
 
-    if (!cardId || typeof cardId !== 'string') {
-      return jsonResponse({ error: '缺少卡片 ID。' }, 400)
+    if (!resolvedTargetId) {
+      return jsonResponse({ error: 'Missing target id.' }, 400)
     }
 
-    const { data: card, error: cardError } = await adminClient
-      .from('cards')
-      .select('id, name, rarity, description, series, album_id, image_url, image_prompt, image_style, image_storage_path, color')
-      .eq('id', cardId)
-      .maybeSingle()
+    let nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : DEFAULT_IMAGE_STYLE
+    let nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : ''
+    let finalPrompt = ''
+    let fileLabel = resolvedTargetId
+    let fileFolder = 'cards'
+    let imageField = 'image_url'
+    let existingStoragePath: string | null = null
+    let record: Record<string, unknown> | null = null
 
-    if (cardError || !card) {
-      return jsonResponse({ error: '找不到要生成圖片的卡片。' }, 404)
+    if (normalizedTargetType === 'card') {
+      const { data: card, error: cardError } = await adminClient
+        .from('cards')
+        .select('id, name, rarity, description, series, album_id, image_url, image_prompt, image_style, image_storage_path, color')
+        .eq('id', resolvedTargetId)
+        .maybeSingle()
+
+      if (cardError || !card) return jsonResponse({ error: 'Card not found.' }, 404)
+
+      let albumName: string | null = null
+      if (card.album_id) {
+        const { data: album } = await adminClient.from('card_albums').select('name').eq('id', card.album_id).maybeSingle()
+        albumName = album?.name ?? null
+      }
+
+      nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : card.image_style ?? DEFAULT_IMAGE_STYLE
+      nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : card.image_prompt ?? ''
+      finalPrompt = buildCardPrompt(card as CardRow, albumName, nextStyle, nextPrompt)
+      fileLabel = card.name || card.id
+      fileFolder = 'cards'
+      imageField = 'image_url'
+      existingStoragePath = card.image_storage_path ?? null
+    } else if (normalizedTargetType === 'equipment') {
+      const { data: equipment, error: equipmentError } = await adminClient
+        .from('equipment_templates')
+        .select('id, name, rarity, description, slot_type, image_url, image_prompt, image_style')
+        .eq('id', resolvedTargetId)
+        .maybeSingle()
+
+      if (equipmentError || !equipment) return jsonResponse({ error: 'Equipment not found.' }, 404)
+
+      nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : equipment.image_style ?? DEFAULT_IMAGE_STYLE
+      nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : equipment.image_prompt ?? ''
+      finalPrompt = buildEquipmentPrompt(equipment as EquipmentRow, nextStyle, nextPrompt)
+      fileLabel = equipment.name || equipment.id
+      fileFolder = 'equipment'
+      imageField = 'image_url'
+    } else {
+      const { data: profession, error: professionError } = await adminClient
+        .from('profession_templates')
+        .select('id, name, code, description, theme_color, icon_url, image_prompt, image_style, unlock_tier')
+        .eq('id', resolvedTargetId)
+        .maybeSingle()
+
+      if (professionError || !profession) return jsonResponse({ error: 'Profession not found.' }, 404)
+
+      nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : profession.image_style ?? DEFAULT_IMAGE_STYLE
+      nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : profession.image_prompt ?? ''
+      finalPrompt = buildProfessionPrompt(profession as ProfessionRow, nextStyle, nextPrompt)
+      fileLabel = profession.name || profession.id
+      fileFolder = 'professions'
+      imageField = 'icon_url'
     }
-
-    let albumName: string | null = null
-    if (card.album_id) {
-      const { data: album } = await adminClient.from('card_albums').select('name').eq('id', card.album_id).maybeSingle()
-      albumName = album?.name ?? null
-    }
-
-    const nextStyle = typeof imageStyle === 'string' && imageStyle.trim() ? imageStyle.trim() : card.image_style ?? 'Q版校園奇幻'
-    const nextPrompt = typeof imagePrompt === 'string' ? imagePrompt.trim() : card.image_prompt ?? ''
-    const finalPrompt = buildPrompt(card as CardRow, albumName, nextStyle, nextPrompt)
 
     const generationResult =
       activeProvider === 'gemini'
@@ -529,23 +611,29 @@ Deno.serve(async request => {
           error: generationResult.error,
           diagnostics: {
             provider: activeProvider,
-            model: generationResult.modelUsed ?? (activeProvider === 'gemini' ? geminiModel : activeProvider === 'huggingface' ? huggingFaceModel : openAiModel),
+            model:
+              generationResult.modelUsed ??
+              (activeProvider === 'gemini'
+                ? geminiModel
+                : activeProvider === 'huggingface'
+                  ? huggingFaceModel
+                  : openAiModel),
             status: generationResult.status,
             debug: generationResult.debug ?? null,
           },
         },
-        200,
+        200
       )
     }
 
     const mimeType = generationResult.mimeType ?? 'image/png'
     const fileExtension = getImageExtension(mimeType)
-    const fileName = `${Date.now()}-${slugify(card.name || 'card')}.${fileExtension}`
-    const filePath = `${card.id}/${fileName}`
+    const fileName = `${Date.now()}-${slugify(fileLabel || 'image')}.${fileExtension}`
+    const filePath = `${fileFolder}/${resolvedTargetId}/${fileName}`
     const fileBytes = decodeBase64Image(generationResult.base64Image)
 
-    if (card.image_storage_path) {
-      await adminClient.storage.from('card-images').remove([card.image_storage_path])
+    if (existingStoragePath) {
+      await adminClient.storage.from('card-images').remove([existingStoragePath])
     }
 
     const { error: uploadError } = await adminClient.storage.from('card-images').upload(filePath, fileBytes, {
@@ -559,44 +647,79 @@ Deno.serve(async request => {
 
     const { data: publicUrlData } = adminClient.storage.from('card-images').getPublicUrl(filePath)
 
-    const updatePayload = {
-      image_url: publicUrlData.publicUrl,
-      image_prompt: nextPrompt || null,
-      image_style: nextStyle,
-      image_storage_path: filePath,
-      image_generated_at: new Date().toISOString(),
-    }
+    if (normalizedTargetType === 'card') {
+      const { data, error: updateError } = await adminClient
+        .from('cards')
+        .update({
+          image_url: publicUrlData.publicUrl,
+          image_prompt: nextPrompt || null,
+          image_style: nextStyle,
+          image_storage_path: filePath,
+          image_generated_at: new Date().toISOString(),
+        })
+        .eq('id', resolvedTargetId)
+        .select('*, album:album_id(*)')
+        .single()
 
-    const { data: updatedCard, error: updateError } = await adminClient
-      .from('cards')
-      .update(updatePayload)
-      .eq('id', card.id)
-      .select('*, album:album_id(*)')
-      .single()
+      if (updateError) return jsonResponse({ error: updateError.message }, 500)
+      record = data as Record<string, unknown>
+    } else if (normalizedTargetType === 'equipment') {
+      const { data, error: updateError } = await adminClient
+        .from('equipment_templates')
+        .update({
+          image_url: publicUrlData.publicUrl,
+          image_prompt: nextPrompt || null,
+          image_style: nextStyle,
+        })
+        .eq('id', resolvedTargetId)
+        .select('*, equipment_effects(*)')
+        .single()
 
-    if (updateError) {
-      return jsonResponse({ error: updateError.message }, 500)
+      if (updateError) return jsonResponse({ error: updateError.message }, 500)
+      record = data as Record<string, unknown>
+    } else {
+      const { data, error: updateError } = await adminClient
+        .from('profession_templates')
+        .update({
+          icon_url: publicUrlData.publicUrl,
+          image_prompt: nextPrompt || null,
+          image_style: nextStyle,
+        })
+        .eq('id', resolvedTargetId)
+        .select('*, profession_effects(*)')
+        .single()
+
+      if (updateError) return jsonResponse({ error: updateError.message }, 500)
+      record = data as Record<string, unknown>
     }
 
     return jsonResponse({
-        card: updatedCard,
-        image_url: updatePayload.image_url,
-        image_storage_path: updatePayload.image_storage_path,
-        image_style: nextStyle,
-        image_prompt: nextPrompt || null,
-        provider: activeProvider,
-        provider_label: PROVIDER_LABELS[activeProvider],
-        key_source: keySource,
-        model: activeProvider === 'gemini' ? geminiModel : activeProvider === 'huggingface' ? huggingFaceModel : openAiModel,
-        final_prompt: finalPrompt,
-        message: `已透過 ${PROVIDER_LABELS[activeProvider]}${keySource === 'teacher' ? '（教師自備 key）' : ''} 為卡片「${card.name}」生成新圖片。`,
-      })
+      targetType: normalizedTargetType,
+      record,
+      [normalizedTargetType]: record,
+      image_url: publicUrlData.publicUrl,
+      image_field: imageField,
+      image_storage_path: normalizedTargetType === 'card' ? filePath : null,
+      image_style: nextStyle,
+      image_prompt: nextPrompt || null,
+      provider: activeProvider,
+      provider_label: PROVIDER_LABELS[activeProvider],
+      key_source: keySource,
+      model:
+        activeProvider === 'gemini'
+          ? geminiModel
+          : activeProvider === 'huggingface'
+            ? huggingFaceModel
+            : openAiModel,
+      final_prompt: finalPrompt,
+      message: `Image generated with ${PROVIDER_LABELS[activeProvider]}${keySource === 'teacher' ? ' (teacher key)' : ''}.`,
+    })
   } catch (error) {
     return jsonResponse(
       {
-        error: error instanceof Error ? error.message : '生成卡圖時發生未預期錯誤。',
+        error: error instanceof Error ? error.message : 'AI image generation failed unexpectedly.',
       },
-      500,
+      500
     )
   }
 })
