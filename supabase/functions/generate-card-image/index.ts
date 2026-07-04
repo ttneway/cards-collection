@@ -36,11 +36,43 @@ type CardRow = {
   color: string | null
 }
 
+const LOCATION_KEYWORDS = ['場', '室', '館', '樓', '台', '站', '院', '廳', '園', '校門', '操場', '球場', '跑道', '教室', '圖書館'] as const
+const OBJECT_KEYWORDS = ['卡', '徽章', '獎盃', '裝備', '道具', '球', '書', '證書', '旗', '印章'] as const
+
+const SUBJECT_HINTS: Array<{ match: string; hint: string }> = [
+  { match: '排球場', hint: 'volleyball court' },
+  { match: '籃球場', hint: 'basketball court' },
+  { match: '足球場', hint: 'soccer field' },
+  { match: '棒球場', hint: 'baseball field' },
+  { match: '操場', hint: 'school athletic field and running track' },
+  { match: '圖書館', hint: 'school library interior' },
+  { match: '教室', hint: 'classroom interior' },
+  { match: '校門', hint: 'school gate entrance' },
+  { match: '體育館', hint: 'school gymnasium interior' },
+  { match: '舞台', hint: 'school stage performance area' },
+  { match: '實驗室', hint: 'school science laboratory' },
+  { match: '游泳池', hint: 'school swimming pool' },
+  { match: '樂器', hint: 'musical instrument' },
+  { match: '獎盃', hint: 'trophy award object' },
+  { match: '徽章', hint: 'badge emblem object' },
+]
+
 function slugify(value: string) {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+function detectSubjectKind(name: string) {
+  if (LOCATION_KEYWORDS.some(keyword => name.includes(keyword))) return 'location'
+  if (OBJECT_KEYWORDS.some(keyword => name.includes(keyword))) return 'object'
+  return 'character'
+}
+
+function buildSubjectHints(name: string, imagePrompt: string | null) {
+  const combined = `${name} ${imagePrompt ?? ''}`
+  return SUBJECT_HINTS.filter(entry => combined.includes(entry.match)).map(entry => entry.hint)
 }
 
 function buildPrompt(card: CardRow, albumName: string | null, imageStyle: string, imagePrompt: string | null) {
@@ -51,12 +83,27 @@ function buildPrompt(card: CardRow, albumName: string | null, imageStyle: string
     : ''
   const description = card.description?.trim() ? `Card description: ${card.description.trim()}` : ''
   const isFrameStyle = imageStyle === '卡牌外框收藏卡風'
+  const subjectKind = detectSubjectKind(card.name)
+  const subjectHints = buildSubjectHints(card.name, imagePrompt)
   const compositionGuardrail = isFrameStyle
     ? 'Render the result as a complete trading card face with a visible border frame on all four edges.'
     : 'Fill the image with the main scene and do not add a card border or printed frame.'
   const negativePrompt = isFrameStyle
-    ? 'Avoid text, watermarks, UI, and speech bubbles.'
-    : 'Avoid text, watermarks, UI, speech bubbles, and borders inside the illustration.'
+    ? 'Avoid text, watermarks, UI, speech bubbles, readable letters, name plates, and subtitles inside the artwork.'
+    : 'Avoid text, watermarks, UI, speech bubbles, readable letters, and borders inside the illustration.'
+  const subjectInstruction =
+    subjectKind === 'location'
+      ? 'This is a location card. The image must depict the place itself as the main subject, using a wide or medium-wide scene composition. Do not make a single-character portrait the main image.'
+      : subjectKind === 'object'
+        ? 'This is an object card. The image must depict the named item or symbol itself as the main subject, not a person holding it unless the object still dominates the composition.'
+        : 'This is a character card. The named character should be the main subject.'
+  const peopleRule =
+    subjectKind === 'location'
+      ? 'If people appear, they must be small supporting figures inside the scene, such as students playing on the court, and the place must remain the dominant subject.'
+      : subjectKind === 'object'
+        ? 'If people appear, they must be secondary and clearly support the named object.'
+        : 'If other props or scenery appear, they must support the named character.'
+  const englishHints = subjectHints.length > 0 ? `English subject hints: ${subjectHints.join(', ')}.` : ''
 
   return [
     stylePrompt,
@@ -67,14 +114,16 @@ function buildPrompt(card: CardRow, albumName: string | null, imageStyle: string
     `Card rarity: ${card.rarity}.`,
     `Main accent color: ${card.color ?? '#334155'}.`,
     'Treat any additional teacher direction as supporting detail only. It must not replace the named primary subject.',
-    'If the card name describes a place, room, court, field, building, object, item, symbol, or scene, show that full subject as the main composition instead of a character close-up portrait.',
-    'If people appear, they must be secondary and clearly shown within the named scene or interacting with the named subject.',
+    subjectInstruction,
+    peopleRule,
+    englishHints,
     compositionGuardrail,
     description,
     customPrompt,
     negativePrompt,
     'Focus on one clear subject that matches the album theme and feels suitable for a campus card game.',
     'Make the main subject obvious at first glance.',
+    'Do not generate unrelated random anime girls when the named subject is a place or object.',
   ]
     .filter(Boolean)
     .join(' ')
