@@ -4,7 +4,7 @@ import { formatDiagnosticsText, invokeAiImageFunction, type AiDiagnostics, type 
 import { supabase } from '../lib/supabase'
 import { EFFECT_LABELS, STYLE_OPTIONS, formatEffectValue, getBalanceWarnings, getTierLabel } from '../lib/character'
 import { useAuthStore } from '../stores/authStore'
-import type { ProfessionEffect, ProfessionEffectType, ProfessionTemplate } from '../types'
+import type { BonusEntry, ProfessionEffect, ProfessionEffectType, ProfessionTemplate } from '../types'
 
 type ProfessionWithEffects = ProfessionTemplate & { profession_effects?: ProfessionEffect[] }
 
@@ -34,6 +34,13 @@ const AI_PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI / ChatGPT' },
   { value: 'huggingface', label: 'Hugging Face' },
 ] as const
+
+const PREVIEW_LEVEL_OPTIONS = [10, 20, 30, 40, 50, 60] as const
+
+type PreviewBonusesPayload = {
+  summary: Partial<Record<ProfessionEffectType, number>>
+  entries: BonusEntry[]
+}
 
 const defaultEffect = (): EffectForm => ({
   effect_type: 'task_points_percent',
@@ -72,6 +79,9 @@ export default function TeacherProfessionsPage() {
   const [probingAiImage, setProbingAiImage] = useState(false)
   const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [teacherApiKey, setTeacherApiKey] = useState('')
+  const [previewLevel, setPreviewLevel] = useState<number>(10)
+  const [previewBonuses, setPreviewBonuses] = useState<PreviewBonusesPayload | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const warnings = useMemo(
     () => getBalanceWarnings(effects.length, effects.map(effect => effect.effect_type)),
@@ -165,6 +175,32 @@ export default function TeacherProfessionsPage() {
     }
   }
 
+  const loadPreviewBonuses = async (professionId: string, level = previewLevel) => {
+    setPreviewLoading(true)
+
+    try {
+      const { data, error } = await supabase.rpc('preview_character_bonuses', {
+        p_profession_ids: [professionId],
+        p_primary_profession_id: professionId,
+        p_level: level,
+        p_equipment_ids: [],
+      })
+
+      if (error) throw error
+
+      const payload = data as PreviewBonusesPayload | null
+      setPreviewBonuses({
+        summary: payload?.summary ?? {},
+        entries: (payload?.entries ?? []) as BonusEntry[],
+      })
+    } catch (previewError) {
+      setError(previewError instanceof Error ? previewError.message : '無法取得職業加成預覽。')
+      setPreviewBonuses(null)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
   const resetForm = () => {
     setEditingId(null)
     setForm(emptyForm)
@@ -196,6 +232,7 @@ export default function TeacherProfessionsPage() {
     )
     setMessage(`正在編輯職業「${profession.name}」。`)
     setError(null)
+    void loadPreviewBonuses(profession.id, previewLevel)
   }
 
   const saveProfessionRecord = async () => {
@@ -341,6 +378,15 @@ export default function TeacherProfessionsPage() {
   const updateEffect = (index: number, key: keyof EffectForm, value: string | number) => {
     setEffects(previous => previous.map((effect, effectIndex) => (effectIndex === index ? { ...effect, [key]: value } : effect)))
   }
+
+  useEffect(() => {
+    if (!editingId) {
+      setPreviewBonuses(null)
+      return
+    }
+
+    void loadPreviewBonuses(editingId, previewLevel)
+  }, [editingId, previewLevel])
 
   return (
     <div className="space-y-6">
@@ -577,6 +623,72 @@ export default function TeacherProfessionsPage() {
             </button>
           </div>
         </form>
+      </section>
+
+      <section className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-white">加成預覽</h2>
+            <p className="mt-1 text-sm text-slate-400">查看目前編輯中的職業在不同等級時，會帶來哪些角色加成。</p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {PREVIEW_LEVEL_OPTIONS.map(level => (
+              <button
+                key={level}
+                type="button"
+                onClick={() => setPreviewLevel(level)}
+                className={`rounded-full px-3 py-1.5 text-sm ${
+                  previewLevel === level ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                Lv.{level}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {!editingId ? (
+          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 text-sm text-slate-400">
+            先儲存或選擇一個現有職業，才能使用角色加成預覽。
+          </div>
+        ) : previewLoading ? (
+          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 text-sm text-slate-300">
+            正在載入 Lv.{previewLevel} 的加成預覽...
+          </div>
+        ) : previewBonuses ? (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {Object.entries(previewBonuses.summary).map(([effectType, value]) => (
+                <div key={effectType} className="rounded-xl bg-slate-900/60 px-4 py-3">
+                  <p className="text-sm text-slate-400">{EFFECT_LABELS[effectType as ProfessionEffectType] ?? effectType}</p>
+                  <p className="mt-1 text-lg font-semibold text-emerald-300">
+                    {formatEffectValue(effectType as ProfessionEffectType, Number(value ?? 0))}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+              <h3 className="font-semibold text-white">加成明細</h3>
+              {previewBonuses.entries.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-400">目前沒有可預覽的加成項目。</p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {previewBonuses.entries.map((entry, index) => (
+                    <div key={`${entry.source_name}-${entry.effect_type}-${index}`} className="flex items-center justify-between rounded-xl bg-slate-800 px-3 py-2 text-sm">
+                      <div>
+                        <p className="text-slate-100">{entry.source_name}</p>
+                        <p className="text-xs text-slate-500">{EFFECT_LABELS[entry.effect_type] ?? entry.effect_type}</p>
+                      </div>
+                      <span className="font-semibold text-emerald-300">{formatEffectValue(entry.effect_type, Number(entry.value))}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="space-y-4">
