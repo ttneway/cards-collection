@@ -1,5 +1,12 @@
 import { supabase } from './supabase'
 
+export const HUGGING_FACE_MODEL_OPTIONS = [
+  { value: 'black-forest-labs/FLUX.1-schnell', label: 'FLUX.1 schnell' },
+  { value: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'Stable Diffusion XL' },
+  { value: 'stabilityai/stable-diffusion-3.5-large', label: 'Stable Diffusion 3.5 Large' },
+  { value: 'XLabs-AI/flux-RealismLora', label: 'FLUX Realism LoRA' },
+] as const
+
 export type AiImageStatus = {
   ready: boolean
   configured_provider: string

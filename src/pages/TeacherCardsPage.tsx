@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Sparkles, Upload, Wand2, X } from 'lucide-react'
 import TeacherCardManagementTabs from '../components/TeacherCardManagementTabs'
+import { HUGGING_FACE_MODEL_OPTIONS } from '../lib/aiImage'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import { uploadImageFile } from '../lib/imageUpload'
 import { supabase } from '../lib/supabase'
@@ -144,6 +145,7 @@ export default function TeacherCardsPage() {
   const [uploadingImage, setUploadingImage] = useState(false)
   const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [teacherApiKey, setTeacherApiKey] = useState('')
+  const [huggingFaceModel, setHuggingFaceModel] = useState<string>(HUGGING_FACE_MODEL_OPTIONS[0].value)
   const [cardScale, setCardScale] = useState<number>(() =>
     readStoredNumber(CARD_SCALE_STORAGE_KEY, CARD_SCALE_DEFAULT, CARD_SCALE_MIN, CARD_SCALE_MAX)
   )
@@ -202,6 +204,7 @@ export default function TeacherCardsPage() {
         action: 'status',
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
       })
 
       if (!result.ok || !result.data) {
@@ -235,6 +238,7 @@ export default function TeacherCardsPage() {
         action: 'probe',
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
       })
 
       const data = result.data as Record<string, any> | null
@@ -374,6 +378,7 @@ export default function TeacherCardsPage() {
         imageStyle: cardForm.image_style,
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
       })
 
       const data = result.data as Record<string, any> | null
@@ -419,6 +424,7 @@ export default function TeacherCardsPage() {
         imageStyle: card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0],
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
       })
 
       const data = result.data as Record<string, any> | null
@@ -692,6 +698,22 @@ export default function TeacherCardsPage() {
                       />
                     </label>
                   </div>
+                  {aiProvider === 'huggingface' ? (
+                    <label className="space-y-1">
+                      <span className="text-xs text-slate-400">Hugging Face 模型</span>
+                      <select
+                        value={huggingFaceModel}
+                        onChange={event => setHuggingFaceModel(event.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                      >
+                        {HUGGING_FACE_MODEL_OPTIONS.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <p className="text-xs text-slate-500">這把 key 只會在這次操作傳到 Edge Function，不會直接寫進資料庫。</p>
                 </div>
                 <div className="flex items-start justify-between gap-3">

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ImagePlus, KeyRound, Plus, RefreshCw, Save, Sparkles, SwitchCamera, Wand2, X } from 'lucide-react'
-import { formatDiagnosticsText, invokeAiImageFunction, type AiDiagnostics, type AiImageStatus } from '../lib/aiImage'
+import { HUGGING_FACE_MODEL_OPTIONS, formatDiagnosticsText, invokeAiImageFunction, type AiDiagnostics, type AiImageStatus } from '../lib/aiImage'
 import { supabase } from '../lib/supabase'
 import { EFFECT_LABELS, STYLE_OPTIONS, formatEffectValue, getBalanceWarnings, getTierLabel } from '../lib/character'
 import { useAuthStore } from '../stores/authStore'
@@ -79,6 +79,7 @@ export default function TeacherProfessionsPage() {
   const [probingAiImage, setProbingAiImage] = useState(false)
   const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [teacherApiKey, setTeacherApiKey] = useState('')
+  const [huggingFaceModel, setHuggingFaceModel] = useState<string>(HUGGING_FACE_MODEL_OPTIONS[0].value)
   const [previewLevel, setPreviewLevel] = useState<number>(10)
   const [previewBonuses, setPreviewBonuses] = useState<PreviewBonusesPayload | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -118,6 +119,7 @@ export default function TeacherProfessionsPage() {
         action: 'status',
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
       })
 
       if (!result.ok || !result.data) {
@@ -151,6 +153,7 @@ export default function TeacherProfessionsPage() {
         action: 'probe',
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
       })
 
       const data = result.data as Record<string, any> | null
@@ -329,6 +332,7 @@ export default function TeacherProfessionsPage() {
         imageStyle: form.image_style,
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
       })
 
       const data = result.data as Record<string, any> | null
@@ -513,6 +517,19 @@ export default function TeacherProfessionsPage() {
                       <input type="password" value={teacherApiKey} onChange={event => setTeacherApiKey(event.target.value)} autoComplete="off" spellCheck={false} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
                     </label>
                   </div>
+
+                  {aiProvider === 'huggingface' ? (
+                    <label className="space-y-1">
+                      <span className="text-xs text-slate-400">Hugging Face 模型</span>
+                      <select value={huggingFaceModel} onChange={event => setHuggingFaceModel(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+                        {HUGGING_FACE_MODEL_OPTIONS.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                 </div>
 
                 <div className="flex items-start justify-between gap-3">
