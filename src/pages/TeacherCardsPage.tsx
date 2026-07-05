@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Sparkles, Upload, Wand2, X } from 'lucide-react'
 import TeacherCardManagementTabs from '../components/TeacherCardManagementTabs'
-import { HUGGING_FACE_MODEL_OPTIONS } from '../lib/aiImage'
+import { DEFAULT_HUGGING_FACE_AUTHOR, DEFAULT_HUGGING_FACE_MODEL_NAME, buildHuggingFaceModelPath } from '../lib/aiImage'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import { uploadImageFile } from '../lib/imageUpload'
 import { supabase } from '../lib/supabase'
@@ -145,7 +145,8 @@ export default function TeacherCardsPage() {
   const [uploadingImage, setUploadingImage] = useState(false)
   const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [teacherApiKey, setTeacherApiKey] = useState('')
-  const [huggingFaceModel, setHuggingFaceModel] = useState<string>(HUGGING_FACE_MODEL_OPTIONS[0].value)
+  const [huggingFaceAuthor, setHuggingFaceAuthor] = useState(DEFAULT_HUGGING_FACE_AUTHOR)
+  const [huggingFaceModelName, setHuggingFaceModelName] = useState(DEFAULT_HUGGING_FACE_MODEL_NAME)
   const [cardScale, setCardScale] = useState<number>(() =>
     readStoredNumber(CARD_SCALE_STORAGE_KEY, CARD_SCALE_DEFAULT, CARD_SCALE_MIN, CARD_SCALE_MAX)
   )
@@ -158,6 +159,7 @@ export default function TeacherCardsPage() {
   const canUseAiImage = aiImageStatus?.ready !== false || hasTeacherApiKey
   const hasAlbums = albums.length > 0
   const cardGridMinWidth = useMemo(() => Math.round(220 * (cardScale / 100)), [cardScale])
+  const huggingFaceModel = buildHuggingFaceModelPath(huggingFaceAuthor, huggingFaceModelName)
 
   useEffect(() => {
     void Promise.all([loadAlbums(), loadCards()])
@@ -699,20 +701,31 @@ export default function TeacherCardsPage() {
                     </label>
                   </div>
                   {aiProvider === 'huggingface' ? (
-                    <label className="space-y-1">
-                      <span className="text-xs text-slate-400">Hugging Face 模型</span>
-                      <select
-                        value={huggingFaceModel}
-                        onChange={event => setHuggingFaceModel(event.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
-                      >
-                        {HUGGING_FACE_MODEL_OPTIONS.map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="space-y-1">
+                        <span className="text-xs text-slate-400">作者 / 組織</span>
+                        <input
+                          type="text"
+                          value={huggingFaceAuthor}
+                          onChange={event => setHuggingFaceAuthor(event.target.value)}
+                          autoComplete="off"
+                          spellCheck={false}
+                          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs text-slate-400">模型名稱</span>
+                        <input
+                          type="text"
+                          value={huggingFaceModelName}
+                          onChange={event => setHuggingFaceModelName(event.target.value)}
+                          autoComplete="off"
+                          spellCheck={false}
+                          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                        />
+                      </label>
+                      <p className="sm:col-span-2 text-xs text-slate-500">目前模型路徑：{huggingFaceModel}</p>
+                    </div>
                   ) : null}
                   <p className="text-xs text-slate-500">這把 key 只會在這次操作傳到 Edge Function，不會直接寫進資料庫。</p>
                 </div>

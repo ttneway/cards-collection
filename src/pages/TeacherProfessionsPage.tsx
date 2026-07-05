@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ImagePlus, KeyRound, Plus, RefreshCw, Save, Sparkles, SwitchCamera, Wand2, X } from 'lucide-react'
-import { HUGGING_FACE_MODEL_OPTIONS, formatDiagnosticsText, invokeAiImageFunction, type AiDiagnostics, type AiImageStatus } from '../lib/aiImage'
+import {
+  DEFAULT_HUGGING_FACE_AUTHOR,
+  DEFAULT_HUGGING_FACE_MODEL_NAME,
+  buildHuggingFaceModelPath,
+  formatDiagnosticsText,
+  invokeAiImageFunction,
+  type AiDiagnostics,
+  type AiImageStatus,
+} from '../lib/aiImage'
 import { supabase } from '../lib/supabase'
 import { EFFECT_LABELS, STYLE_OPTIONS, formatEffectValue, getBalanceWarnings, getTierLabel } from '../lib/character'
 import { useAuthStore } from '../stores/authStore'
@@ -79,7 +87,8 @@ export default function TeacherProfessionsPage() {
   const [probingAiImage, setProbingAiImage] = useState(false)
   const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [teacherApiKey, setTeacherApiKey] = useState('')
-  const [huggingFaceModel, setHuggingFaceModel] = useState<string>(HUGGING_FACE_MODEL_OPTIONS[0].value)
+  const [huggingFaceAuthor, setHuggingFaceAuthor] = useState(DEFAULT_HUGGING_FACE_AUTHOR)
+  const [huggingFaceModelName, setHuggingFaceModelName] = useState(DEFAULT_HUGGING_FACE_MODEL_NAME)
   const [previewLevel, setPreviewLevel] = useState<number>(10)
   const [previewBonuses, setPreviewBonuses] = useState<PreviewBonusesPayload | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -90,6 +99,7 @@ export default function TeacherProfessionsPage() {
   )
   const hasTeacherApiKey = teacherApiKey.trim().length > 0
   const canUseAiImage = aiImageStatus?.ready !== false || hasTeacherApiKey
+  const huggingFaceModel = buildHuggingFaceModelPath(huggingFaceAuthor, huggingFaceModelName)
 
   useEffect(() => {
     void loadProfessions()
@@ -519,16 +529,17 @@ export default function TeacherProfessionsPage() {
                   </div>
 
                   {aiProvider === 'huggingface' ? (
-                    <label className="space-y-1">
-                      <span className="text-xs text-slate-400">Hugging Face 模型</span>
-                      <select value={huggingFaceModel} onChange={event => setHuggingFaceModel(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
-                        {HUGGING_FACE_MODEL_OPTIONS.map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="space-y-1">
+                        <span className="text-xs text-slate-400">作者 / 組織</span>
+                        <input type="text" value={huggingFaceAuthor} onChange={event => setHuggingFaceAuthor(event.target.value)} autoComplete="off" spellCheck={false} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs text-slate-400">模型名稱</span>
+                        <input type="text" value={huggingFaceModelName} onChange={event => setHuggingFaceModelName(event.target.value)} autoComplete="off" spellCheck={false} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+                      </label>
+                      <p className="sm:col-span-2 text-xs text-slate-500">目前模型路徑：{huggingFaceModel}</p>
+                    </div>
                   ) : null}
                 </div>
 
