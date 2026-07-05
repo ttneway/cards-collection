@@ -6,6 +6,14 @@ const comfyuiBaseUrl = (process.env.COMFYUI_BASE_URL || 'http://127.0.0.1:8188')
 const sharedSecret = process.env.GATEWAY_SHARED_SECRET || ''
 const allowedOrigin = process.env.ALLOWED_ORIGIN || '*'
 const defaultTimeoutMs = Number(process.env.GENERATE_TIMEOUT_MS || 120000)
+const idleUnloadMs = Number(process.env.IDLE_UNLOAD_MS || 300000)
+
+let idleUnloadTimer = null
+let unloadInFlight = null
+let lastActivityAt = Date.now()
+let lastReleaseAt = null
+let lastReleaseReason = null
+let lastReleaseError = null
 
 function writeJson(response, statusCode, payload, origin = '*') {
   response.writeHead(statusCode, {
@@ -39,6 +47,88 @@ async function fetchJson(url, options = {}) {
   return { response, payload }
 }
 
+async function readRequestBody(request) {
+  const chunks = []
+  for await (const chunk of request) {
+    chunks.push(chunk)
+  }
+  const raw = Buffer.concat(chunks).toString('utf8')
+  return raw ? JSON.parse(raw) : {}
+}
+
+async function freeComfyUiMemory() {
+  const response = await fetch(`${comfyuiBaseUrl}/free`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      unload_models: true,
+      free_memory: true,
+    }),
+  })
+
+  const payload = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(`ComfyUI release failed with HTTP ${response.status}`)
+  }
+
+  return payload
+}
+
+function scheduleIdleUnload() {
+  if (idleUnloadTimer) {
+    clearTimeout(idleUnloadTimer)
+  }
+
+  if (idleUnloadMs <= 0) {
+    return
+  }
+
+  idleUnloadTimer = setTimeout(() => {
+    void releaseModels('idle_timeout')
+  }, idleUnloadMs)
+}
+
+function markActivity() {
+  lastActivityAt = Date.now()
+  scheduleIdleUnload()
+}
+
+async function releaseModels(reason) {
+  if (unloadInFlight) {
+    return unloadInFlight
+  }
+
+  unloadInFlight = (async () => {
+    try {
+      const payload = await freeComfyUiMemory()
+      lastReleaseAt = new Date().toISOString()
+      lastReleaseReason = reason
+      lastReleaseError = null
+      return {
+        ok: true,
+        released: true,
+        reason,
+        released_at: lastReleaseAt,
+        diagnostics: payload,
+      }
+    } catch (error) {
+      lastReleaseError = error instanceof Error ? error.message : 'Unknown release error'
+      return {
+        ok: false,
+        released: false,
+        reason,
+        released_at: lastReleaseAt,
+        error: lastReleaseError,
+      }
+    } finally {
+      unloadInFlight = null
+    }
+  })()
+
+  return unloadInFlight
+}
+
 async function waitForImage(promptId, timeoutMs) {
   const startedAt = Date.now()
 
@@ -46,7 +136,7 @@ async function waitForImage(promptId, timeoutMs) {
     const { response, payload } = await fetchJson(`${comfyuiBaseUrl}/history/${encodeURIComponent(promptId)}`)
 
     if (!response.ok) {
-      throw new Error(`讀取 ComfyUI 歷史紀錄失敗，HTTP ${response.status}`)
+      throw new Error(`Unable to read ComfyUI history (HTTP ${response.status}).`)
     }
 
     const promptHistory = payload?.[promptId]
@@ -62,17 +152,10 @@ async function waitForImage(promptId, timeoutMs) {
     await new Promise(resolve => setTimeout(resolve, 1500))
   }
 
-  throw new Error('共享生圖主機等待 ComfyUI 圖片輸出逾時。')
+  throw new Error('Timed out while waiting for ComfyUI to finish generating.')
 }
 
-async function readRequestBody(request) {
-  const chunks = []
-  for await (const chunk of request) {
-    chunks.push(chunk)
-  }
-  const raw = Buffer.concat(chunks).toString('utf8')
-  return raw ? JSON.parse(raw) : {}
-}
+scheduleIdleUnload()
 
 const server = http.createServer(async (request, response) => {
   const origin = allowedOrigin === '*' ? '*' : request.headers.origin === allowedOrigin ? allowedOrigin : allowedOrigin
@@ -92,12 +175,12 @@ const server = http.createServer(async (request, response) => {
     const incomingSecret = request.headers['x-shared-secret']
 
     if (!sharedSecret) {
-      writeJson(response, 500, { error: 'Gateway 尚未設定 GATEWAY_SHARED_SECRET。' }, origin)
+      writeJson(response, 500, { error: 'Gateway is missing GATEWAY_SHARED_SECRET.' }, origin)
       return
     }
 
     if (incomingSecret !== sharedSecret) {
-      writeJson(response, 401, { error: '共享金鑰驗證失敗。' }, origin)
+      writeJson(response, 401, { error: 'Shared secret is invalid.' }, origin)
       return
     }
 
@@ -112,7 +195,12 @@ const server = http.createServer(async (request, response) => {
           ready: comfyuiReachable,
           gateway_reachable: true,
           comfyui_reachable: comfyuiReachable,
-          message: comfyuiReachable ? '共享生圖主機已就緒。' : 'Gateway 可連線，但 ComfyUI 尚未就緒。',
+          idle_unload_ms: idleUnloadMs,
+          last_activity_at: new Date(lastActivityAt).toISOString(),
+          last_release_at: lastReleaseAt,
+          last_release_reason: lastReleaseReason,
+          last_release_error: lastReleaseError,
+          message: comfyuiReachable ? 'Shared ComfyUI host is ready.' : 'Gateway is reachable, but ComfyUI is unavailable.',
           diagnostics: payload,
         },
         origin
@@ -120,14 +208,21 @@ const server = http.createServer(async (request, response) => {
       return
     }
 
+    if (url.pathname === '/release' && request.method === 'POST') {
+      const releaseResult = await releaseModels('manual')
+      writeJson(response, releaseResult.ok ? 200 : 502, releaseResult, origin)
+      return
+    }
+
     if (url.pathname === '/generate' && request.method === 'POST') {
+      markActivity()
       const body = await readRequestBody(request)
       const workflowSource = body.workflow
       const placeholders = body.placeholders ?? {}
       const timeoutMs = Number(body.timeoutMs || defaultTimeoutMs)
 
       if (!workflowSource) {
-        writeJson(response, 400, { error: '缺少 workflow。' }, origin)
+        writeJson(response, 400, { error: 'Missing workflow.' }, origin)
         return
       }
 
@@ -141,7 +236,7 @@ const server = http.createServer(async (request, response) => {
       })
 
       if (!promptResponse.ok || !promptPayload?.prompt_id) {
-        writeJson(response, 502, { error: '送出 ComfyUI workflow 失敗。', diagnostics: promptPayload }, origin)
+        writeJson(response, 502, { error: 'Failed to submit workflow to ComfyUI.', diagnostics: promptPayload }, origin)
         return
       }
 
@@ -153,7 +248,7 @@ const server = http.createServer(async (request, response) => {
 
       const imageResponse = await fetch(imageUrl)
       if (!imageResponse.ok) {
-        writeJson(response, 502, { error: '讀取 ComfyUI 生成圖片失敗。', diagnostics: { status: imageResponse.status } }, origin)
+        writeJson(response, 502, { error: 'Failed to fetch generated image from ComfyUI.', diagnostics: { status: imageResponse.status } }, origin)
         return
       }
 
@@ -180,7 +275,7 @@ const server = http.createServer(async (request, response) => {
       response,
       500,
       {
-        error: error instanceof Error ? error.message : 'Gateway 發生未預期錯誤。',
+        error: error instanceof Error ? error.message : 'Gateway failed unexpectedly.',
       },
       allowedOrigin === '*' ? '*' : allowedOrigin
     )

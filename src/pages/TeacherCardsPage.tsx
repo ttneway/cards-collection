@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Server, Sparkles, Upload, Wand2, X } from 'lucide-react'
 import TeacherCardManagementTabs from '../components/TeacherCardManagementTabs'
-import { DEFAULT_HUGGING_FACE_AUTHOR, DEFAULT_HUGGING_FACE_MODEL_NAME, buildHuggingFaceModelPath } from '../lib/aiImage'
+import { DEFAULT_HUGGING_FACE_AUTHOR, DEFAULT_HUGGING_FACE_MODEL_NAME, buildHuggingFaceModelPath, formatDiagnosticsText, invokeAiImageFunction } from '../lib/aiImage'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
-import { checkRemoteAiGateway, generateRemoteCardPreview, loadRemoteAiSettings, type RemoteAiGatewayHealth } from '../lib/remoteAi'
+import { checkRemoteAiGateway, generateRemoteCardPreview, loadRemoteAiSettings, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
 import { supabase } from '../lib/supabase'
 import type { Card, CardAlbum, Rarity, RemoteAiSettings } from '../types'
 import { clampNumber, readStoredNumber } from '../utils/helpers'
@@ -86,51 +86,6 @@ function mapCardToForm(card: CardWithAlbum): CardForm {
   }
 }
 
-function formatDiagnosticsText(diagnostics: AiDiagnostics | string | null | undefined) {
-  if (!diagnostics) return null
-  if (typeof diagnostics === 'string') return diagnostics
-
-  const lines = [
-    diagnostics.provider ? `provider: ${diagnostics.provider}` : null,
-    diagnostics.model ? `model: ${diagnostics.model}` : null,
-    typeof diagnostics.status === 'number' ? `status: ${diagnostics.status}` : null,
-    diagnostics.debug ? `debug: ${diagnostics.debug}` : null,
-  ].filter(Boolean)
-
-  return lines.length > 0 ? lines.join('\n') : null
-}
-
-async function invokeImageFunction(body: Record<string, unknown>) {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
-  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-card-image`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${session?.access_token ?? ''}`,
-    },
-    body: JSON.stringify(body),
-  })
-
-  const responseText = await response.text()
-  let payload: Record<string, unknown> | null = null
-
-  try {
-    payload = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : null
-  } catch {
-    payload = { error: responseText || `Edge Function returned HTTP ${response.status}` }
-  }
-
-  return {
-    ok: response.ok,
-    status: response.status,
-    data: payload,
-  }
-}
-
 export default function TeacherCardsPage() {
   const appVersion = __APP_VERSION__
   const [albums, setAlbums] = useState<CardAlbum[]>([])
@@ -182,6 +137,7 @@ export default function TeacherCardsPage() {
   const hasAlbums = albums.length > 0
   const cardGridMinWidth = useMemo(() => Math.round(220 * (cardScale / 100)), [cardScale])
   const huggingFaceModel = buildHuggingFaceModelPath(huggingFaceAuthor, huggingFaceModelName)
+  const aiSourceRef = useRef<(typeof AI_SOURCE_OPTIONS)[number]['value']>(aiSource)
 
   useEffect(() => {
     void Promise.all([loadAlbums(), loadCards()])
@@ -206,6 +162,23 @@ export default function TeacherCardsPage() {
       }
     }
   }, [remotePreviewUrl])
+
+  useEffect(() => {
+    const previousSource = aiSourceRef.current
+    aiSourceRef.current = aiSource
+
+    if (previousSource === 'remote_comfyui' && aiSource !== 'remote_comfyui') {
+      void releaseRemoteAiModels().catch(() => {})
+    }
+  }, [aiSource])
+
+  useEffect(() => {
+    return () => {
+      if (aiSourceRef.current === 'remote_comfyui') {
+        void releaseRemoteAiModels().catch(() => {})
+      }
+    }
+  }, [])
 
   async function loadAlbums() {
     const { data, error } = await supabase.from('card_albums').select('*').order('created_at', { ascending: false })
@@ -242,7 +215,17 @@ export default function TeacherCardsPage() {
     }
   }
 
-  function clearRemotePreview() {
+  async function releaseRemoteModelsIfNeeded() {
+    if (!canUseRemoteAi) return
+
+    try {
+      await releaseRemoteAiModels()
+    } catch {
+      // Best effort cleanup only; the gateway idle timer is the fallback.
+    }
+  }
+
+  function clearRemotePreview(shouldRelease = false) {
     if (remotePreviewUrl?.startsWith('blob:')) {
       URL.revokeObjectURL(remotePreviewUrl)
     }
@@ -253,13 +236,17 @@ export default function TeacherCardsPage() {
     setRemotePreviewCardId(null)
     setRemotePreviewPrompt('')
     setRemotePreviewStyle(CARD_IMAGE_STYLE_OPTIONS[0])
+
+    if (shouldRelease) {
+      void releaseRemoteModelsIfNeeded()
+    }
   }
 
   async function loadAiImageStatus() {
     setCheckingAiStatus(true)
 
     try {
-      const result = await invokeImageFunction({
+      const result = await invokeAiImageFunction({
         action: 'status',
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
@@ -293,7 +280,7 @@ export default function TeacherCardsPage() {
     setError(null)
 
     try {
-      const result = await invokeImageFunction({
+      const result = await invokeAiImageFunction({
         action: 'probe',
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
@@ -340,7 +327,7 @@ export default function TeacherCardsPage() {
   }
 
   function resetCardForm() {
-    clearRemotePreview()
+    clearRemotePreview(true)
     setEditingCardId(null)
     setCardForm({
       ...emptyCardForm,
@@ -456,7 +443,7 @@ export default function TeacherCardsPage() {
           imageStyle: cardForm.image_style,
         })
 
-        clearRemotePreview()
+        clearRemotePreview(true)
         setRemotePreviewUrl(`data:${preview.mime_type};base64,${preview.preview_image_base64}`)
         setRemotePreviewBase64(preview.preview_image_base64)
         setRemotePreviewMimeType(preview.mime_type)
@@ -467,7 +454,7 @@ export default function TeacherCardsPage() {
         return
       }
 
-      const result = await invokeImageFunction({
+      const result = await invokeAiImageFunction({
         cardId: card.id,
         imagePrompt: cardForm.image_prompt.trim(),
         imageStyle: cardForm.image_style,
@@ -523,7 +510,7 @@ export default function TeacherCardsPage() {
           imageStyle: card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0],
         })
 
-        clearRemotePreview()
+        clearRemotePreview(true)
         setRemotePreviewUrl(`data:${preview.mime_type};base64,${preview.preview_image_base64}`)
         setRemotePreviewBase64(preview.preview_image_base64)
         setRemotePreviewMimeType(preview.mime_type)
@@ -534,7 +521,7 @@ export default function TeacherCardsPage() {
         return
       }
 
-      const result = await invokeImageFunction({
+      const result = await invokeAiImageFunction({
         cardId: card.id,
         imagePrompt: card.image_prompt ?? '',
         imageStyle: card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0],
@@ -613,7 +600,7 @@ export default function TeacherCardsPage() {
       if (editingCardId === remotePreviewCardId) {
         setCardForm(mapCardToForm(data as CardWithAlbum))
       }
-      clearRemotePreview()
+      clearRemotePreview(true)
       setMessage('已套用共享 ComfyUI 主機預覽圖。')
     } catch (applyError) {
       setError(applyError instanceof Error ? applyError.message : '套用預覽圖失敗。')
@@ -624,7 +611,7 @@ export default function TeacherCardsPage() {
 
   function beginEditCard(card: CardWithAlbum) {
     if (remotePreviewCardId && remotePreviewCardId !== card.id) {
-      clearRemotePreview()
+      clearRemotePreview(true)
     }
     setEditingCardId(card.id)
     setCardForm(mapCardToForm(card))
@@ -1026,7 +1013,7 @@ export default function TeacherCardsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={clearRemotePreview}
+                            onClick={() => clearRemotePreview(true)}
                             disabled={applyingRemotePreview}
                             className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-xs text-slate-100 hover:bg-slate-600 disabled:opacity-50"
                           >

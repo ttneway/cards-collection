@@ -22,6 +22,13 @@ export type RemoteAiPreviewResult = {
   final_prompt: string
 }
 
+export type RemoteAiReleaseResult = {
+  ok: boolean
+  released: boolean
+  reason?: string
+  released_at?: string | null
+}
+
 export async function loadRemoteAiSettings() {
   const { data, error } = await supabase.rpc('get_remote_ai_settings')
 
@@ -96,4 +103,19 @@ export async function generateRemoteCardPreview(input: {
   }
 
   return data as unknown as RemoteAiPreviewResult
+}
+
+export async function releaseRemoteAiModels() {
+  const result = await invokeAiImageFunction({ action: 'remote_release' })
+  const data = result.data as Record<string, unknown> | null
+
+  if (!result.ok || !data) {
+    throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+  }
+
+  if (data.error) {
+    throw new Error(data.error as string)
+  }
+
+  return data as unknown as RemoteAiReleaseResult
 }

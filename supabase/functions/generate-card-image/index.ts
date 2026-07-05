@@ -373,6 +373,33 @@ async function callRemoteGatewayGenerate(settings: RemoteAiSettingsRow, payload:
   }
 }
 
+async function callRemoteGatewayRelease(settings: RemoteAiSettingsRow) {
+  const response = await fetch(`${settings.base_url.replace(/\/+$/g, '')}/release`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-shared-secret': settings.shared_secret ?? '',
+    },
+    body: JSON.stringify({}),
+  })
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+      payload: data,
+    }
+  }
+
+  return {
+    ok: true,
+    status: response.status,
+    payload: data,
+  }
+}
+
 Deno.serve(async request => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -497,6 +524,51 @@ Deno.serve(async request => {
         provider: 'comfyui_gateway',
         message: (gatewayPayload.message as string | undefined) ?? null,
         diagnostics: debugSummary(gatewayPayload),
+      })
+    }
+
+    if (action === 'remote_release') {
+      const remoteSettings = await loadRemoteAiSettings(adminClient)
+
+      if (
+        !remoteSettings ||
+        !remoteSettings.is_enabled ||
+        !remoteSettings.base_url.trim() ||
+        !remoteSettings.shared_secret?.trim()
+      ) {
+        return jsonResponse({
+          ok: true,
+          released: false,
+          provider: 'comfyui_gateway',
+          message: 'Shared ComfyUI host is not configured.',
+        })
+      }
+
+      const releaseResult = await callRemoteGatewayRelease(remoteSettings)
+
+      if (!releaseResult.ok) {
+        return jsonResponse(
+          {
+            error: 'Failed to release remote ComfyUI models.',
+            diagnostics: {
+              provider: 'comfyui_gateway',
+              model: null,
+              status: releaseResult.status,
+              debug: debugSummary(releaseResult.payload),
+            },
+          },
+          200
+        )
+      }
+
+      const releasePayload = (releaseResult.payload ?? {}) as Record<string, unknown>
+
+      return jsonResponse({
+        ok: true,
+        released: Boolean(releasePayload.released ?? true),
+        provider: 'comfyui_gateway',
+        released_at: releasePayload.released_at ?? null,
+        reason: releasePayload.reason ?? 'manual',
       })
     }
 
