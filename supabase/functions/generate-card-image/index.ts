@@ -1,25 +1,16 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.2'
+import { buildCardPrompt, buildEquipmentPrompt, buildProfessionPrompt, DEFAULT_IMAGE_STYLE } from '../../../src/lib/aiPromptBuilder.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const DEFAULT_IMAGE_STYLE = 'Q版校園奇幻'
-
-const STYLE_PROMPTS: Record<string, string> = {
-  [DEFAULT_IMAGE_STYLE]:
-    'Create a polished chibi fantasy campus illustration with bright lighting, clear silhouette, soft depth, and a premium collectible mobile game feeling.',
-  '日系動漫插畫':
-    'Create a clean anime illustration with readable composition, expressive lighting, refined details, and a premium game reward presentation.',
-  '紙牌卡框風格':
-    'Create a polished collectible trading-card illustration with a visible decorative frame on all four edges and premium printed-card styling.',
-}
-
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   gemini: 'Google Gemini',
   huggingface: 'Hugging Face',
+  comfyui_gateway: '共享 ComfyUI 主機',
 }
 
 type TargetType = 'card' | 'equipment' | 'profession'
@@ -59,6 +50,15 @@ type ProfessionRow = {
   image_prompt: string | null
   image_style: string | null
   unlock_tier: number
+}
+
+type RemoteAiSettingsRow = {
+  provider: string
+  base_url: string
+  shared_secret: string | null
+  workflow_api_json: string
+  negative_prompt: string
+  is_enabled: boolean
 }
 
 type GenerationSuccess = {
@@ -153,80 +153,6 @@ function resolveImageProvider(openAiApiKey: string, geminiApiKey: string, huggin
 
 function resolveRequestProvider(provider: string, apiKey: string) {
   return apiKey && (provider === 'gemini' || provider === 'openai' || provider === 'huggingface') ? provider : null
-}
-
-function getStylePrompt(imageStyle: string) {
-  return STYLE_PROMPTS[imageStyle] ?? STYLE_PROMPTS[DEFAULT_IMAGE_STYLE]
-}
-
-function buildCardPrompt(card: CardRow, albumName: string | null, imageStyle: string, imagePrompt: string | null) {
-  const stylePrompt = getStylePrompt(imageStyle)
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
-    : ''
-  const description = card.description?.trim() ? `Card description: ${card.description.trim()}` : ''
-  const albumLabel = albumName ?? card.series ?? 'Campus Collection'
-
-  return [
-    stylePrompt,
-    'Design artwork for a school collectible card.',
-    `The primary subject of this card must be "${card.name}".`,
-    `Album or collection theme: ${albumLabel}.`,
-    `Card rarity: ${card.rarity}.`,
-    `Main accent color: ${card.color ?? '#334155'}.`,
-    description,
-    customPrompt,
-    'Keep the named subject obvious at first glance.',
-    'Avoid text, watermarks, UI, and unrelated random portrait subjects.',
-  ]
-    .filter(Boolean)
-    .join(' ')
-}
-
-function buildEquipmentPrompt(equipment: EquipmentRow, imageStyle: string, imagePrompt: string | null) {
-  const stylePrompt = getStylePrompt(imageStyle)
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
-    : ''
-  const description = equipment.description?.trim() ? `Equipment description: ${equipment.description.trim()}` : ''
-
-  return [
-    stylePrompt,
-    'Design artwork for a school collectible equipment item.',
-    `The equipment named "${equipment.name}" must be the main subject.`,
-    `Equipment slot: ${equipment.slot_type}.`,
-    `Equipment rarity: ${equipment.rarity}.`,
-    description,
-    customPrompt,
-    'The item itself must dominate the composition.',
-    'If a character appears, they must remain secondary to the equipment.',
-    'Avoid text, watermarks, UI, and unrelated random portraits.',
-  ]
-    .filter(Boolean)
-    .join(' ')
-}
-
-function buildProfessionPrompt(profession: ProfessionRow, imageStyle: string, imagePrompt: string | null) {
-  const stylePrompt = getStylePrompt(imageStyle)
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
-    : ''
-  const description = profession.description?.trim() ? `Profession description: ${profession.description.trim()}` : ''
-
-  return [
-    stylePrompt,
-    'Design artwork for a fantasy school profession or class.',
-    `The profession named "${profession.name}" must be represented clearly as the main subject.`,
-    `Profession code: ${profession.code}.`,
-    `Theme color: ${profession.theme_color ?? '#6366f1'}.`,
-    `Unlock tier: ${profession.unlock_tier}.`,
-    description,
-    customPrompt,
-    'The result should work as a polished profession icon or portrait for a mobile game selection screen.',
-    'Avoid text, watermarks, UI, and unrelated subjects.',
-  ]
-    .filter(Boolean)
-    .join(' ')
 }
 
 async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: string): Promise<GenerationSuccess | GenerationFailure> {
@@ -381,6 +307,72 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
   }
 }
 
+async function loadRemoteAiSettings(adminClient: ReturnType<typeof createClient>) {
+  const { data, error } = await adminClient
+    .from('remote_ai_settings')
+    .select('provider, base_url, shared_secret, workflow_api_json, negative_prompt, is_enabled')
+    .eq('provider', 'comfyui_gateway')
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(`Failed to load remote AI settings: ${error.message}`)
+  }
+
+  return (data ?? null) as RemoteAiSettingsRow | null
+}
+
+async function callRemoteGatewayHealth(settings: RemoteAiSettingsRow) {
+  const response = await fetch(`${settings.base_url.replace(/\/+$/g, '')}/health`, {
+    method: 'GET',
+    headers: {
+      'x-shared-secret': settings.shared_secret ?? '',
+    },
+  })
+
+  const payload = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+      payload,
+    }
+  }
+
+  return {
+    ok: true,
+    status: response.status,
+    payload,
+  }
+}
+
+async function callRemoteGatewayGenerate(settings: RemoteAiSettingsRow, payload: Record<string, unknown>) {
+  const response = await fetch(`${settings.base_url.replace(/\/+$/g, '')}/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-shared-secret': settings.shared_secret ?? '',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+      payload: data,
+    }
+  }
+
+  return {
+    ok: true,
+    status: response.status,
+    payload: data,
+  }
+}
+
 Deno.serve(async request => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -462,6 +454,52 @@ Deno.serve(async request => {
               ? openAiModel
               : null
 
+    if (action === 'remote_health') {
+      const remoteSettings = await loadRemoteAiSettings(adminClient)
+
+      if (
+        !remoteSettings ||
+        !remoteSettings.is_enabled ||
+        !remoteSettings.base_url.trim() ||
+        !remoteSettings.shared_secret?.trim()
+      ) {
+        return jsonResponse({
+          configured: false,
+          ready: false,
+          gateway_reachable: false,
+          comfyui_reachable: false,
+          provider: 'comfyui_gateway',
+          message: '尚未完成共享 ComfyUI 主機設定。',
+        })
+      }
+
+      const gatewayHealth = await callRemoteGatewayHealth(remoteSettings)
+
+      if (!gatewayHealth.ok) {
+        return jsonResponse({
+          configured: true,
+          ready: false,
+          gateway_reachable: false,
+          comfyui_reachable: false,
+          provider: 'comfyui_gateway',
+          message: '共享生圖主機無法連線。',
+          diagnostics: debugSummary(gatewayHealth.payload) ?? `HTTP ${gatewayHealth.status}`,
+        })
+      }
+
+      const gatewayPayload = (gatewayHealth.payload ?? {}) as Record<string, unknown>
+
+      return jsonResponse({
+        configured: true,
+        ready: Boolean(gatewayPayload.ready),
+        gateway_reachable: Boolean(gatewayPayload.gateway_reachable ?? true),
+        comfyui_reachable: Boolean(gatewayPayload.comfyui_reachable),
+        provider: 'comfyui_gateway',
+        message: (gatewayPayload.message as string | undefined) ?? null,
+        diagnostics: debugSummary(gatewayPayload),
+      })
+    }
+
     if (action === 'status') {
       return jsonResponse({
         configured_provider: configuredProvider,
@@ -479,7 +517,25 @@ Deno.serve(async request => {
       })
     }
 
-    if (!activeProvider) {
+    if (action === 'remote_preview') {
+      const remoteSettings = await loadRemoteAiSettings(adminClient)
+
+      if (
+        !remoteSettings ||
+        !remoteSettings.is_enabled ||
+        !remoteSettings.base_url.trim() ||
+        !remoteSettings.shared_secret?.trim() ||
+        !remoteSettings.workflow_api_json.trim()
+      ) {
+        return jsonResponse({ error: '共享 ComfyUI 主機尚未完成設定。' }, 400)
+      }
+
+      if (normalizedTargetType !== 'card') {
+        return jsonResponse({ error: '共享 ComfyUI 主機目前只支援卡牌生圖。' }, 400)
+      }
+    }
+
+    if (!activeProvider && action !== 'remote_preview') {
       return jsonResponse(
         {
           error:
@@ -535,6 +591,10 @@ Deno.serve(async request => {
     let imageField = 'image_url'
     let existingStoragePath: string | null = null
     let record: Record<string, unknown> | null = null
+    let remoteAlbumName = ''
+    let remoteRarity = ''
+    let remoteCardColor = ''
+    let remoteCardDescription = ''
 
     if (normalizedTargetType === 'card') {
       const { data: card, error: cardError } = await adminClient
@@ -553,11 +613,26 @@ Deno.serve(async request => {
 
       nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : card.image_style ?? DEFAULT_IMAGE_STYLE
       nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : card.image_prompt ?? ''
-      finalPrompt = buildCardPrompt(card as CardRow, albumName, nextStyle, nextPrompt)
+      finalPrompt = buildCardPrompt(
+        {
+          name: card.name,
+          rarity: card.rarity,
+          description: card.description,
+          series: card.series,
+          albumName,
+          color: card.color,
+        },
+        nextStyle,
+        nextPrompt
+      )
       fileLabel = card.name || card.id
       fileFolder = 'cards'
       imageField = 'image_url'
       existingStoragePath = card.image_storage_path ?? null
+      remoteAlbumName = albumName ?? ''
+      remoteRarity = card.rarity
+      remoteCardColor = card.color ?? ''
+      remoteCardDescription = card.description ?? ''
     } else if (normalizedTargetType === 'equipment') {
       const { data: equipment, error: equipmentError } = await adminClient
         .from('equipment_templates')
@@ -569,7 +644,16 @@ Deno.serve(async request => {
 
       nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : equipment.image_style ?? DEFAULT_IMAGE_STYLE
       nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : equipment.image_prompt ?? ''
-      finalPrompt = buildEquipmentPrompt(equipment as EquipmentRow, nextStyle, nextPrompt)
+      finalPrompt = buildEquipmentPrompt(
+        {
+          name: equipment.name,
+          rarity: equipment.rarity,
+          description: equipment.description,
+          slotType: equipment.slot_type,
+        },
+        nextStyle,
+        nextPrompt
+      )
       fileLabel = equipment.name || equipment.id
       fileFolder = 'equipment'
       imageField = 'image_url'
@@ -584,10 +668,96 @@ Deno.serve(async request => {
 
       nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : profession.image_style ?? DEFAULT_IMAGE_STYLE
       nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : profession.image_prompt ?? ''
-      finalPrompt = buildProfessionPrompt(profession as ProfessionRow, nextStyle, nextPrompt)
+      finalPrompt = buildProfessionPrompt(
+        {
+          name: profession.name,
+          code: profession.code,
+          description: profession.description,
+          themeColor: profession.theme_color,
+          unlockTier: profession.unlock_tier,
+        },
+        nextStyle,
+        nextPrompt
+      )
       fileLabel = profession.name || profession.id
       fileFolder = 'professions'
       imageField = 'icon_url'
+    }
+
+    if (action === 'remote_preview') {
+      const remoteSettings = await loadRemoteAiSettings(adminClient)
+
+      if (
+        !remoteSettings ||
+        !remoteSettings.is_enabled ||
+        !remoteSettings.base_url.trim() ||
+        !remoteSettings.shared_secret?.trim() ||
+        !remoteSettings.workflow_api_json.trim()
+      ) {
+        return jsonResponse({ error: '共享 ComfyUI 主機尚未完成設定。' }, 400)
+      }
+
+      const placeholders = {
+        full_prompt: finalPrompt,
+        card_name: fileLabel,
+        card_description: remoteCardDescription,
+        album_name: remoteAlbumName,
+        rarity: remoteRarity,
+        image_style: nextStyle,
+        extra_prompt: nextPrompt,
+        card_color: remoteCardColor,
+        negative_prompt: remoteSettings.negative_prompt ?? '',
+      }
+
+      const remoteGeneration = await callRemoteGatewayGenerate(remoteSettings, {
+        workflow: remoteSettings.workflow_api_json,
+        placeholders,
+        timeoutMs: 120000,
+      })
+
+      if (!remoteGeneration.ok) {
+        return jsonResponse(
+          {
+            error: '共享生圖主機生成失敗。',
+            diagnostics: {
+              provider: 'comfyui_gateway',
+              model: null,
+              status: remoteGeneration.status,
+              debug: debugSummary(remoteGeneration.payload),
+            },
+          },
+          200
+        )
+      }
+
+      const remotePayload = (remoteGeneration.payload ?? {}) as Record<string, unknown>
+      const previewImageBase64 = remotePayload.imageBase64
+      const mimeType = typeof remotePayload.mimeType === 'string' ? remotePayload.mimeType : 'image/png'
+
+      if (!previewImageBase64 || typeof previewImageBase64 !== 'string') {
+        return jsonResponse(
+          {
+            error: '共享生圖主機沒有回傳圖片。',
+            diagnostics: {
+              provider: 'comfyui_gateway',
+              model: null,
+              status: 502,
+              debug: debugSummary(remotePayload),
+            },
+          },
+          200
+        )
+      }
+
+      return jsonResponse({
+        ok: true,
+        card_id: resolvedTargetId,
+        provider: 'comfyui_gateway',
+        provider_label: PROVIDER_LABELS.comfyui_gateway,
+        preview_image_base64: previewImageBase64,
+        mime_type: mimeType,
+        final_prompt: finalPrompt,
+      })
     }
 
     const generationResult =

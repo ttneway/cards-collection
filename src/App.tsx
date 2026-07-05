@@ -22,6 +22,7 @@ import TeacherCardsPage from './pages/TeacherCardsPage'
 import TeacherEquipmentPage from './pages/TeacherEquipmentPage'
 import TeacherPage from './pages/TeacherPage'
 import TeacherProfessionsPage from './pages/TeacherProfessionsPage'
+import TeacherRemoteAiPage from './pages/TeacherRemoteAiPage'
 import TeacherAnalyticsPage from './pages/TeacherAnalyticsPage'
 import TeacherPacksPage from './pages/TeacherPacksPage'
 import TeacherStudentsPage from './pages/TeacherStudentsPage'
@@ -142,6 +143,15 @@ export default function App() {
           element={
             <RoleRoute roles={['teacher', 'admin']}>
               <TeacherPage />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="teacher/ai-remote"
+          element={
+            <RoleRoute roles={['teacher', 'admin']}>
+              <TeacherRemoteAiPage />
             </RoleRoute>
           }
         />

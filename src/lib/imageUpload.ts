@@ -8,25 +8,26 @@ function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, '-')
 }
 
-export async function uploadImageFile(file: File, folder: 'cards' | 'equipment') {
-  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+async function uploadImageBlob(blob: Blob, folder: 'cards' | 'equipment', fileNameBase: string, extensionOverride?: string) {
+  if (!ALLOWED_IMAGE_TYPES.has(blob.type)) {
     throw new Error('只支援 PNG、JPG、JPEG、WEBP 圖片。')
   }
 
-  if (file.size > MAX_IMAGE_BYTES) {
+  if (blob.size > MAX_IMAGE_BYTES) {
     throw new Error('圖片大小不能超過 5 MB。')
   }
 
-  const extension = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() ?? 'png' : 'png'
+  const extensionByType = blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png'
+  const extension = extensionOverride ?? extensionByType
   const timestamp = Date.now()
   const randomSuffix = Math.random().toString(36).slice(2, 10)
-  const safeName = sanitizeFilename(file.name.replace(/\.[^.]+$/, '') || `${folder}-image`)
+  const safeName = sanitizeFilename(fileNameBase || `${folder}-image`)
   const path = `${folder}/manual/${timestamp}-${randomSuffix}-${safeName}.${extension}`
 
-  const { error: uploadError } = await supabase.storage.from(IMAGE_BUCKET).upload(path, file, {
+  const { error: uploadError } = await supabase.storage.from(IMAGE_BUCKET).upload(path, blob, {
     cacheControl: '3600',
     upsert: false,
-    contentType: file.type,
+    contentType: blob.type,
   })
 
   if (uploadError) {
@@ -39,4 +40,14 @@ export async function uploadImageFile(file: File, folder: 'cards' | 'equipment')
     path,
     publicUrl: data.publicUrl,
   }
+}
+
+export async function uploadImageFile(file: File, folder: 'cards' | 'equipment') {
+  const extension = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() ?? 'png' : undefined
+  const fileNameBase = file.name.replace(/\.[^.]+$/, '') || `${folder}-image`
+  return uploadImageBlob(file, folder, fileNameBase, extension)
+}
+
+export async function uploadGeneratedImageBlob(blob: Blob, folder: 'cards' | 'equipment', fileNameBase: string) {
+  return uploadImageBlob(blob, folder, fileNameBase)
 }

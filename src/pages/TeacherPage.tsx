@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BarChart3, Edit3, Library, ListChecks, Package, Settings, Sparkles, Trophy, Users, Wand2 } from 'lucide-react'
+import { BarChart3, Edit3, Library, ListChecks, Package, Server, Settings, Sparkles, Trophy, Users, Wand2 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
@@ -55,6 +55,7 @@ export default function TeacherPage() {
       { icon: Users, label: '學生與條碼', desc: '管理班級、學生名單與身分條碼', href: '/teacher/students' },
       { icon: Wand2, label: '職業管理', desc: '設定職業模板、效果與解鎖梯次', href: '/teacher/professions' },
       { icon: Sparkles, label: '裝備管理', desc: '建立裝備、設定效果並發放給學生', href: '/teacher/equipment' },
+      { icon: Server, label: '共享生圖主機', desc: '設定全校共用的 ComfyUI Gateway 與 workflow', href: '/teacher/ai-remote' },
     ]
 
     if (user?.role === 'admin') {

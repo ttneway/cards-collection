@@ -346,6 +346,17 @@ export interface EquipmentTemplate {
   equipment_effects?: EquipmentEffect[]
 }
 
+export interface RemoteAiSettings {
+  provider: 'comfyui_gateway'
+  base_url: string
+  workflow_api_json: string
+  negative_prompt: string
+  is_enabled: boolean
+  shared_secret_configured: boolean
+  updated_at: string | null
+  updated_by: string | null
+}
+
 export interface PlayerEquipment {
   id: string
   user_id: string

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Sparkles, Upload, Wand2, X } from 'lucide-react'
+import { CheckCircle2, ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Server, Sparkles, Upload, Wand2, X } from 'lucide-react'
 import TeacherCardManagementTabs from '../components/TeacherCardManagementTabs'
 import { DEFAULT_HUGGING_FACE_AUTHOR, DEFAULT_HUGGING_FACE_MODEL_NAME, buildHuggingFaceModelPath } from '../lib/aiImage'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
-import { uploadImageFile } from '../lib/imageUpload'
+import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
+import { checkRemoteAiGateway, generateRemoteCardPreview, loadRemoteAiSettings, type RemoteAiGatewayHealth } from '../lib/remoteAi'
 import { supabase } from '../lib/supabase'
-import type { Card, CardAlbum, Rarity } from '../types'
+import type { Card, CardAlbum, Rarity, RemoteAiSettings } from '../types'
 import { clampNumber, readStoredNumber } from '../utils/helpers'
 
 declare const __APP_VERSION__: string
@@ -47,6 +48,10 @@ const AI_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini' },
   { value: 'openai', label: 'OpenAI / ChatGPT' },
   { value: 'huggingface', label: 'Hugging Face' },
+] as const
+const AI_SOURCE_OPTIONS = [
+  { value: 'cloud', label: '雲端 AI' },
+  { value: 'remote_comfyui', label: '共享 ComfyUI 主機' },
 ] as const
 const CARD_SCALE_STORAGE_KEY = 'teacher-cards-scale'
 const CARD_SCALE_MIN = 70
@@ -143,10 +148,22 @@ export default function TeacherCardsPage() {
   const [checkingAiStatus, setCheckingAiStatus] = useState(false)
   const [probingAiImage, setProbingAiImage] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [aiSource, setAiSource] = useState<(typeof AI_SOURCE_OPTIONS)[number]['value']>('cloud')
   const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [teacherApiKey, setTeacherApiKey] = useState('')
   const [huggingFaceAuthor, setHuggingFaceAuthor] = useState(DEFAULT_HUGGING_FACE_AUTHOR)
   const [huggingFaceModelName, setHuggingFaceModelName] = useState(DEFAULT_HUGGING_FACE_MODEL_NAME)
+  const [remoteAiSettings, setRemoteAiSettings] = useState<RemoteAiSettings | null>(null)
+  const [loadingRemoteAiSettings, setLoadingRemoteAiSettings] = useState(false)
+  const [remoteAiHealth, setRemoteAiHealth] = useState<RemoteAiGatewayHealth | null>(null)
+  const [testingRemoteAi, setTestingRemoteAi] = useState(false)
+  const [remotePreviewUrl, setRemotePreviewUrl] = useState<string | null>(null)
+  const [remotePreviewBase64, setRemotePreviewBase64] = useState<string | null>(null)
+  const [remotePreviewMimeType, setRemotePreviewMimeType] = useState<string | null>(null)
+  const [remotePreviewCardId, setRemotePreviewCardId] = useState<string | null>(null)
+  const [remotePreviewPrompt, setRemotePreviewPrompt] = useState<string>('')
+  const [remotePreviewStyle, setRemotePreviewStyle] = useState<string>(CARD_IMAGE_STYLE_OPTIONS[0])
+  const [applyingRemotePreview, setApplyingRemotePreview] = useState(false)
   const [cardScale, setCardScale] = useState<number>(() =>
     readStoredNumber(CARD_SCALE_STORAGE_KEY, CARD_SCALE_DEFAULT, CARD_SCALE_MIN, CARD_SCALE_MAX)
   )
@@ -156,7 +173,12 @@ export default function TeacherCardsPage() {
     [cards, filter]
   )
   const hasTeacherApiKey = teacherApiKey.trim().length > 0
-  const canUseAiImage = aiImageStatus?.ready !== false || hasTeacherApiKey
+  const canUseCloudAi = aiImageStatus?.ready !== false || hasTeacherApiKey
+  const canUseRemoteAi =
+    Boolean(remoteAiSettings?.is_enabled) &&
+    Boolean(remoteAiSettings?.base_url.trim()) &&
+    Boolean(remoteAiSettings?.workflow_api_json.trim()) &&
+    Boolean(remoteAiSettings?.shared_secret_configured)
   const hasAlbums = albums.length > 0
   const cardGridMinWidth = useMemo(() => Math.round(220 * (cardScale / 100)), [cardScale])
   const huggingFaceModel = buildHuggingFaceModelPath(huggingFaceAuthor, huggingFaceModelName)
@@ -164,6 +186,7 @@ export default function TeacherCardsPage() {
   useEffect(() => {
     void Promise.all([loadAlbums(), loadCards()])
     void loadAiImageStatus()
+    void refreshRemoteAiSettings()
   }, [])
 
   useEffect(() => {
@@ -175,6 +198,14 @@ export default function TeacherCardsPage() {
   useEffect(() => {
     window.localStorage.setItem(CARD_SCALE_STORAGE_KEY, String(cardScale))
   }, [cardScale])
+
+  useEffect(() => {
+    return () => {
+      if (remotePreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(remotePreviewUrl)
+      }
+    }
+  }, [remotePreviewUrl])
 
   async function loadAlbums() {
     const { data, error } = await supabase.from('card_albums').select('*').order('created_at', { ascending: false })
@@ -196,6 +227,32 @@ export default function TeacherCardsPage() {
     }
 
     setCards((data ?? []) as CardWithAlbum[])
+  }
+
+  async function refreshRemoteAiSettings() {
+    setLoadingRemoteAiSettings(true)
+
+    try {
+      const nextSettings = await loadRemoteAiSettings()
+      setRemoteAiSettings(nextSettings)
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : '無法載入共享生圖主機設定。')
+    } finally {
+      setLoadingRemoteAiSettings(false)
+    }
+  }
+
+  function clearRemotePreview() {
+    if (remotePreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(remotePreviewUrl)
+    }
+
+    setRemotePreviewUrl(null)
+    setRemotePreviewBase64(null)
+    setRemotePreviewMimeType(null)
+    setRemotePreviewCardId(null)
+    setRemotePreviewPrompt('')
+    setRemotePreviewStyle(CARD_IMAGE_STYLE_OPTIONS[0])
   }
 
   async function loadAiImageStatus() {
@@ -265,7 +322,25 @@ export default function TeacherCardsPage() {
     }
   }
 
+  async function testRemoteAiGateway() {
+    setTestingRemoteAi(true)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const result = await checkRemoteAiGateway()
+      setRemoteAiHealth(result)
+      setMessage(result.ready ? '共享生圖主機連線成功。' : result.message ?? '共享生圖主機尚未就緒。')
+    } catch (healthError) {
+      setRemoteAiHealth(null)
+      setError(healthError instanceof Error ? healthError.message : '無法測試共享生圖主機。')
+    } finally {
+      setTestingRemoteAi(false)
+    }
+  }
+
   function resetCardForm() {
+    clearRemotePreview()
     setEditingCardId(null)
     setCardForm({
       ...emptyCardForm,
@@ -374,6 +449,24 @@ export default function TeacherCardsPage() {
       setCardForm(mapCardToForm(card))
       setGeneratingCardId(card.id)
 
+      if (aiSource === 'remote_comfyui') {
+        const preview = await generateRemoteCardPreview({
+          cardId: card.id,
+          imagePrompt: cardForm.image_prompt.trim(),
+          imageStyle: cardForm.image_style,
+        })
+
+        clearRemotePreview()
+        setRemotePreviewUrl(`data:${preview.mime_type};base64,${preview.preview_image_base64}`)
+        setRemotePreviewBase64(preview.preview_image_base64)
+        setRemotePreviewMimeType(preview.mime_type)
+        setRemotePreviewCardId(card.id)
+        setRemotePreviewPrompt(cardForm.image_prompt.trim())
+        setRemotePreviewStyle(cardForm.image_style)
+        setMessage('共享 ComfyUI 主機已產生預覽圖，確認後即可套用到卡牌。')
+        return
+      }
+
       const result = await invokeImageFunction({
         cardId: card.id,
         imagePrompt: cardForm.image_prompt.trim(),
@@ -420,6 +513,27 @@ export default function TeacherCardsPage() {
     setAiDiagnostics(null)
 
     try {
+      if (aiSource === 'remote_comfyui') {
+        setEditingCardId(card.id)
+        setCardForm(mapCardToForm(card))
+
+        const preview = await generateRemoteCardPreview({
+          cardId: card.id,
+          imagePrompt: card.image_prompt ?? '',
+          imageStyle: card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0],
+        })
+
+        clearRemotePreview()
+        setRemotePreviewUrl(`data:${preview.mime_type};base64,${preview.preview_image_base64}`)
+        setRemotePreviewBase64(preview.preview_image_base64)
+        setRemotePreviewMimeType(preview.mime_type)
+        setRemotePreviewCardId(card.id)
+        setRemotePreviewPrompt(card.image_prompt ?? '')
+        setRemotePreviewStyle(card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0])
+        setMessage(`共享 ComfyUI 主機已為「${card.name}」產生預覽圖。`)
+        return
+      }
+
       const result = await invokeImageFunction({
         cardId: card.id,
         imagePrompt: card.image_prompt ?? '',
@@ -457,7 +571,61 @@ export default function TeacherCardsPage() {
     }
   }
 
+  async function applyRemotePreview() {
+    if (!remotePreviewUrl || !remotePreviewBase64 || !remotePreviewMimeType || !remotePreviewCardId) {
+      setError('目前沒有可套用的預覽圖。')
+      return
+    }
+
+    setApplyingRemotePreview(true)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const binary = atob(remotePreviewBase64)
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+      const blob = new Blob([bytes], { type: remotePreviewMimeType })
+      const targetCard = cards.find(card => card.id === remotePreviewCardId)
+
+      if (targetCard?.image_storage_path) {
+        await supabase.storage.from('card-images').remove([targetCard.image_storage_path])
+      }
+
+      const uploadResult = await uploadGeneratedImageBlob(blob, 'cards', (targetCard?.name ?? cardForm.name ?? 'card-preview').trim())
+      const { data, error: updateError } = await supabase
+        .from('cards')
+        .update({
+          image_url: uploadResult.publicUrl,
+          image_storage_path: uploadResult.path,
+          image_prompt: remotePreviewPrompt || null,
+          image_style: remotePreviewStyle,
+          image_generated_at: new Date().toISOString(),
+        })
+        .eq('id', remotePreviewCardId)
+        .select('*, album:album_id(*)')
+        .single()
+
+      if (updateError) {
+        throw updateError
+      }
+
+      await loadCards()
+      if (editingCardId === remotePreviewCardId) {
+        setCardForm(mapCardToForm(data as CardWithAlbum))
+      }
+      clearRemotePreview()
+      setMessage('已套用共享 ComfyUI 主機預覽圖。')
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : '套用預覽圖失敗。')
+    } finally {
+      setApplyingRemotePreview(false)
+    }
+  }
+
   function beginEditCard(card: CardWithAlbum) {
+    if (remotePreviewCardId && remotePreviewCardId !== card.id) {
+      clearRemotePreview()
+    }
     setEditingCardId(card.id)
     setCardForm(mapCardToForm(card))
     setMessage(`正在編輯卡牌「${card.name}」。`)
@@ -646,7 +814,9 @@ export default function TeacherCardsPage() {
               </div>
 
               <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-white/10 shadow-lg" style={{ backgroundColor: cardForm.color || '#334155' }}>
-                {cardForm.image_url ? (
+                {remotePreviewUrl ? (
+                  <img src={remotePreviewUrl} alt={cardForm.name || '卡牌預覽'} className="h-full w-full object-cover" />
+                ) : cardForm.image_url ? (
                   <img src={cardForm.image_url} alt={cardForm.name || '卡牌預覽'} className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full flex-col justify-between bg-black/10 p-4 text-white">
@@ -666,105 +836,208 @@ export default function TeacherCardsPage() {
 
               <div className="mt-4 space-y-2 rounded-xl border border-slate-700 bg-slate-800/70 p-3 text-sm text-slate-300">
                 <p>AI 會參考卡牌名稱、稀有度、分集冊、風格模板與你的補充提示詞來生成卡圖。</p>
-                <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium text-white">
-                    <KeyRound size={16} className="text-fuchsia-300" />
-                    教師自備 API key
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-[0.7fr_1.3fr]">
-                    <label className="space-y-1">
-                      <span className="text-xs text-slate-400">供應商</span>
-                      <select
-                        value={aiProvider}
-                        onChange={event => setAiProvider(event.target.value as typeof aiProvider)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
-                      >
-                        {AI_PROVIDER_OPTIONS.map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {AI_SOURCE_OPTIONS.map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setAiSource(option.value)}
+                      className={`rounded-xl border px-3 py-2 text-left text-sm ${
+                        aiSource === option.value
+                          ? 'border-indigo-500 bg-indigo-500/15 text-white'
+                          : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
 
-                    <label className="space-y-1">
-                      <span className="text-xs text-slate-400">API key</span>
-                      <input
-                        type="password"
-                        value={teacherApiKey}
-                        onChange={event => setTeacherApiKey(event.target.value)}
-                        placeholder="輸入你自己的金鑰"
-                        autoComplete="off"
-                        spellCheck={false}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
-                      />
-                    </label>
-                  </div>
-                  {aiProvider === 'huggingface' ? (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="space-y-1">
-                        <span className="text-xs text-slate-400">作者 / 組織</span>
-                        <input
-                          type="text"
-                          value={huggingFaceAuthor}
-                          onChange={event => setHuggingFaceAuthor(event.target.value)}
-                          autoComplete="off"
-                          spellCheck={false}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
-                        />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="text-xs text-slate-400">模型名稱</span>
-                        <input
-                          type="text"
-                          value={huggingFaceModelName}
-                          onChange={event => setHuggingFaceModelName(event.target.value)}
-                          autoComplete="off"
-                          spellCheck={false}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
-                        />
-                      </label>
-                      <p className="sm:col-span-2 text-xs text-slate-500">目前模型路徑：{huggingFaceModel}</p>
+                {aiSource === 'cloud' ? (
+                  <>
+                    <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                      <div className="flex items-center gap-2 text-sm font-medium text-white">
+                        <KeyRound size={16} className="text-fuchsia-300" />
+                        教師自備 API key
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-[0.7fr_1.3fr]">
+                        <label className="space-y-1">
+                          <span className="text-xs text-slate-400">供應商</span>
+                          <select
+                            value={aiProvider}
+                            onChange={event => setAiProvider(event.target.value as typeof aiProvider)}
+                            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                          >
+                            {AI_PROVIDER_OPTIONS.map(option => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="space-y-1">
+                          <span className="text-xs text-slate-400">API key</span>
+                          <input
+                            type="password"
+                            value={teacherApiKey}
+                            onChange={event => setTeacherApiKey(event.target.value)}
+                            placeholder="輸入你自己的金鑰"
+                            autoComplete="off"
+                            spellCheck={false}
+                            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                          />
+                        </label>
+                      </div>
+                      {aiProvider === 'huggingface' ? (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="space-y-1">
+                            <span className="text-xs text-slate-400">作者 / 組織</span>
+                            <input
+                              type="text"
+                              value={huggingFaceAuthor}
+                              onChange={event => setHuggingFaceAuthor(event.target.value)}
+                              autoComplete="off"
+                              spellCheck={false}
+                              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                            />
+                          </label>
+                          <label className="space-y-1">
+                            <span className="text-xs text-slate-400">模型名稱</span>
+                            <input
+                              type="text"
+                              value={huggingFaceModelName}
+                              onChange={event => setHuggingFaceModelName(event.target.value)}
+                              autoComplete="off"
+                              spellCheck={false}
+                              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                            />
+                          </label>
+                          <p className="sm:col-span-2 text-xs text-slate-500">目前模型路徑：{huggingFaceModel}</p>
+                        </div>
+                      ) : null}
+                      <p className="text-xs text-slate-500">這把 key 只會在這次操作傳到 Edge Function，不會直接寫進資料庫。</p>
                     </div>
-                  ) : null}
-                  <p className="text-xs text-slate-500">這把 key 只會在這次操作傳到 Edge Function，不會直接寫進資料庫。</p>
-                </div>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className={aiImageStatus?.ready ? 'text-emerald-200' : 'text-amber-200'}>
-                      {aiImageStatus?.ready
-                        ? `目前使用 ${aiImageStatus.provider_label}：${aiImageStatus.model}${aiImageStatus.key_source === 'teacher' ? '（教師自備 key）' : '（系統 Secret）'}`
-                        : `尚未完成 AI 圖片設定：${aiImageStatus?.missing_secret ?? '請檢查設定'}`}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">若未提供教師自備 key，系統會改用 Supabase Edge Function 內設定好的預設金鑰。</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void loadAiImageStatus()}
-                    disabled={checkingAiStatus}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-50"
-                  >
-                    <RefreshCw size={14} className={checkingAiStatus ? 'animate-spin' : ''} />
-                    檢查
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void probeAiImage()}
-                    disabled={probingAiImage}
-                    className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-900/40 px-3 py-2 text-xs text-fuchsia-200 hover:bg-fuchsia-900/60 disabled:opacity-50"
-                  >
-                    {probingAiImage ? <Sparkles size={14} className="animate-pulse" /> : <Wand2 size={14} />}
-                    {probingAiImage ? '檢查中...' : '測試生圖'}
-                  </button>
-                </div>
-                {aiDiagnostics ? (
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-                    <p className="mb-2 text-xs font-medium text-amber-200">AI 診斷資訊</p>
-                    <pre className="whitespace-pre-wrap break-words text-xs text-amber-100">{aiDiagnostics}</pre>
-                  </div>
-                ) : null}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className={aiImageStatus?.ready ? 'text-emerald-200' : 'text-amber-200'}>
+                          {aiImageStatus?.ready
+                            ? `目前使用 ${aiImageStatus.provider_label}：${aiImageStatus.model}${aiImageStatus.key_source === 'teacher' ? '（教師自備 key）' : '（系統 Secret）'}`
+                            : `尚未完成 AI 圖片設定：${aiImageStatus?.missing_secret ?? '請檢查設定'}`}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">若未提供教師自備 key，系統會改用 Supabase Edge Function 內設定好的預設金鑰。</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void loadAiImageStatus()}
+                        disabled={checkingAiStatus}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={checkingAiStatus ? 'animate-spin' : ''} />
+                        檢查
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void probeAiImage()}
+                        disabled={probingAiImage}
+                        className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-900/40 px-3 py-2 text-xs text-fuchsia-200 hover:bg-fuchsia-900/60 disabled:opacity-50"
+                      >
+                        {probingAiImage ? <Sparkles size={14} className="animate-pulse" /> : <Wand2 size={14} />}
+                        {probingAiImage ? '檢查中...' : '測試生圖'}
+                      </button>
+                    </div>
+                    {aiDiagnostics ? (
+                      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+                        <p className="mb-2 text-xs font-medium text-amber-200">AI 診斷資訊</p>
+                        <pre className="whitespace-pre-wrap break-words text-xs text-amber-100">{aiDiagnostics}</pre>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                      <div className="flex items-center gap-2 text-sm font-medium text-white">
+                        <Server size={16} className="text-indigo-300" />
+                        共享 ComfyUI 主機
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        這裡會使用教師後台統一設定的 Gateway 公開網址、共享金鑰與 ComfyUI workflow。需要先到「共享生圖主機」頁完成設定。
+                      </p>
+                      <div className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300">
+                        {loadingRemoteAiSettings
+                          ? '讀取共享設定中...'
+                          : remoteAiSettings?.base_url
+                            ? `Gateway：${remoteAiSettings.base_url}`
+                            : '尚未設定 Gateway 公開網址'}
+                      </div>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className={canUseRemoteAi ? 'text-emerald-200' : 'text-amber-200'}>
+                          {canUseRemoteAi ? '共享 ComfyUI 主機設定已就緒。' : '共享生圖主機尚未完成設定或尚未啟用。'}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {!remoteAiSettings?.shared_secret_configured
+                            ? '尚未設定共享金鑰。'
+                            : remoteAiHealth?.message ?? '你可以先測試連線，再產生預覽圖。'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void testRemoteAiGateway()}
+                        disabled={testingRemoteAi}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={testingRemoteAi ? 'animate-spin' : ''} />
+                        {testingRemoteAi ? '測試中' : '測試連線'}
+                      </button>
+                    </div>
+                    {remoteAiHealth ? (
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.configured ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-100' : 'border-slate-700 bg-slate-900/60 text-slate-300'}`}>
+                          設定：{remoteAiHealth.configured ? '完成' : '未完成'}
+                        </div>
+                        <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.gateway_reachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-rose-500/30 bg-rose-500/10 text-rose-100'}`}>
+                          Gateway：{remoteAiHealth.gateway_reachable ? '可連線' : '失敗'}
+                        </div>
+                        <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.comfyui_reachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100'}`}>
+                          ComfyUI：{remoteAiHealth.comfyui_reachable ? '就緒' : '未就緒'}
+                        </div>
+                      </div>
+                    ) : null}
+                    {remotePreviewUrl ? (
+                      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                        <div className="flex items-center gap-2 text-xs font-medium text-emerald-100">
+                          <CheckCircle2 size={14} />
+                          已產生共享主機預覽圖
+                        </div>
+                        <p className="mt-2 text-xs text-emerald-100/80">確認畫面後再套用，才會正式上傳到卡牌圖片。</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void applyRemotePreview()}
+                            disabled={applyingRemotePreview}
+                            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                          >
+                            {applyingRemotePreview ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                            {applyingRemotePreview ? '套用中...' : '套用到卡牌'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={clearRemotePreview}
+                            disabled={applyingRemotePreview}
+                            className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-xs text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+                          >
+                            <X size={14} />
+                            捨棄預覽
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -804,11 +1077,11 @@ export default function TeacherCardsPage() {
             <button
               type="button"
               onClick={generateCardImage}
-              disabled={savingCard || generatingCard || !cardForm.name.trim() || !cardForm.album_id || !canUseAiImage || !hasAlbums}
+              disabled={savingCard || generatingCard || !cardForm.name.trim() || !cardForm.album_id || !(aiSource === 'cloud' ? canUseCloudAi : canUseRemoteAi) || !hasAlbums}
               className="inline-flex items-center gap-2 rounded-xl bg-fuchsia-600 px-5 py-3 font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50"
             >
               {generatingCard ? <Sparkles size={16} className="animate-pulse" /> : <Wand2 size={16} />}
-              {generatingCard ? 'AI 生圖中...' : editingCardId ? '更新並生成卡圖' : '建立並生成卡圖'}
+              {generatingCard ? '生圖中...' : aiSource === 'remote_comfyui' ? '產生預覽圖' : editingCardId ? '更新並生成卡圖' : '建立並生成卡圖'}
             </button>
           </div>
         </form>
@@ -906,11 +1179,11 @@ export default function TeacherCardsPage() {
                 <button
                   type="button"
                   onClick={() => void generateCardImageForCard(card)}
-                  disabled={(generatingCard && generatingCardId === card.id) || !canUseAiImage}
+                  disabled={(generatingCard && generatingCardId === card.id) || !(aiSource === 'cloud' ? canUseCloudAi : canUseRemoteAi)}
                   className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-600/20 px-3 py-2 text-sm text-fuchsia-300 hover:bg-fuchsia-600/30 disabled:opacity-50"
                 >
                   <Wand2 size={16} />
-                  {generatingCard && generatingCardId === card.id ? '生圖中...' : 'AI 生圖'}
+                  {generatingCard && generatingCardId === card.id ? '生圖中...' : aiSource === 'remote_comfyui' ? '產生預覽' : 'AI 生圖'}
                 </button>
 
                 <button
