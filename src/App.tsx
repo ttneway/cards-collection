@@ -150,7 +150,7 @@ export default function App() {
         <Route
           path="teacher/ai-remote"
           element={
-            <RoleRoute roles={['teacher', 'admin']}>
+            <RoleRoute roles={['admin']}>
               <TeacherRemoteAiPage />
             </RoleRoute>
           }

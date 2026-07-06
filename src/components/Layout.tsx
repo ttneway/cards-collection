@@ -42,7 +42,7 @@ const navItems = [
   { to: '/teacher/students', icon: Users, label: '學生條碼', roles: ['teacher', 'admin'] },
   { to: '/teacher/professions', icon: Wand2, label: '職業後台', roles: ['teacher', 'admin'] },
   { to: '/teacher/equipment', icon: ShoppingBag, label: '裝備後台', roles: ['teacher', 'admin'] },
-  { to: '/teacher/ai-remote', icon: Server, label: '共享生圖', roles: ['teacher', 'admin'] },
+  { to: '/teacher/ai-remote', icon: Server, label: '共享生圖', roles: ['admin'] },
   { to: '/teacher', icon: Sparkles, label: '教師後台', roles: ['teacher', 'admin'] },
   { to: '/admin', icon: Settings, label: '管理者', roles: ['admin'] },
 ]

@@ -12,6 +12,7 @@ interface HomeData {
     id: string
     name: string
     color: string | null
+    image_url: string | null
     count: number
   }>
 }
@@ -30,7 +31,7 @@ export default function HomePage() {
         supabase.from('user_achievements').select('count', { count: 'exact' }).eq('user_id', user.id),
         supabase
           .from('user_cards')
-          .select('count, card:card_id(id, name, color)')
+          .select('count, card:card_id(id, name, color, image_url)')
           .eq('user_id', user.id)
           .order('acquired_at', { ascending: false })
           .limit(4)
@@ -168,13 +169,17 @@ export default function HomePage() {
             {data.recentCards.map(card => (
               <div
                 key={card.id}
-                className="relative flex h-32 w-24 flex-shrink-0 items-center justify-center rounded-2xl p-2 text-center text-xs font-bold text-white"
+                className="relative h-32 w-24 flex-shrink-0 overflow-hidden rounded-2xl text-center text-xs font-bold text-white"
                 style={{ backgroundColor: card.color || '#334155' }}
               >
                 <div className="absolute right-2 top-2 rounded-full bg-slate-950/70 px-2 py-0.5 text-[10px] font-semibold text-white">
                   x{card.count}
                 </div>
-                {card.name}
+                {card.image_url ? (
+                  <img src={card.image_url} alt={card.name} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full items-center justify-center p-2">{card.name}</div>
+                )}
               </div>
             ))}
           </div>

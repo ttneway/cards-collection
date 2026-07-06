@@ -55,10 +55,10 @@ export default function TeacherPage() {
       { icon: Users, label: '學生與條碼', desc: '管理班級、學生名單與身分條碼', href: '/teacher/students' },
       { icon: Wand2, label: '職業管理', desc: '設定職業模板、效果與解鎖梯次', href: '/teacher/professions' },
       { icon: Sparkles, label: '裝備管理', desc: '建立裝備、設定效果並發放給學生', href: '/teacher/equipment' },
-      { icon: Server, label: '共享生圖主機', desc: '設定全校共用的 ComfyUI Gateway 與 workflow', href: '/teacher/ai-remote' },
     ]
 
     if (user?.role === 'admin') {
+      links.push({ icon: Server, label: '共享生圖主機', desc: '設定全校共用的 ComfyUI Gateway 與 workflow', href: '/teacher/ai-remote' })
       links.push({ icon: Settings, label: '管理者設定', desc: '管理高權限帳號與系統設定', href: '/admin' })
     }
 

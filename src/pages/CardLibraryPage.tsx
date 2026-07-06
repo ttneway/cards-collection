@@ -273,7 +273,7 @@ export default function CardLibraryPage() {
                   <div
                     key={card.id}
                     className={`relative rounded-2xl p-3 text-center transition-all ${
-                      owned ? 'opacity-100 shadow-lg' : 'opacity-40'
+                      owned ? 'opacity-100 shadow-lg' : 'opacity-85'
                     }`}
                     style={{ backgroundColor: card.color || '#1e293b' }}
                   >
@@ -287,17 +287,29 @@ export default function CardLibraryPage() {
                       className="mb-2 aspect-[3/4] overflow-hidden rounded-xl"
                       style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}
                     >
-                      {card.image_url ? (
+                      {owned && card.image_url ? (
                         <img src={card.image_url} alt={card.name} className="h-full w-full object-cover" />
-                      ) : (
+                      ) : owned ? (
                         <div className="flex h-full items-center justify-center text-center text-sm font-bold text-white">
                           <span className="px-2">{card.name}</span>
+                        </div>
+                      ) : (
+                        <div className="flex h-full items-center justify-center bg-slate-950/35">
+                          <div className="rounded-xl border border-dashed border-white/20 px-3 py-2 text-[11px] font-medium tracking-wide text-white/55">
+                            未獲得
+                          </div>
                         </div>
                       )}
                     </div>
 
-                    <p className="truncate text-sm font-medium text-white">{card.name}</p>
-                    <p className="mt-1 text-[11px] text-white/70">{getAlbumName(card)}</p>
+                    {owned ? (
+                      <>
+                        <p className="truncate text-sm font-medium text-white">{card.name}</p>
+                        <p className="mt-1 text-[11px] text-white/70">{getAlbumName(card)}</p>
+                      </>
+                    ) : (
+                      <div className="h-[38px]" />
+                    )}
                   </div>
                 )
               })}

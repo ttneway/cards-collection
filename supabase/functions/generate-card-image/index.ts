@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.2'
+import { InferenceClient } from 'https://esm.sh/@huggingface/inference'
 import { buildCardPrompt, buildEquipmentPrompt, buildProfessionPrompt, DEFAULT_IMAGE_STYLE } from '../../../src/lib/aiPromptBuilder.ts'
 
 const corsHeaders = {
@@ -75,6 +76,34 @@ type GenerationFailure = {
   debug?: string | null
 }
 
+type HuggingFaceProviderMapping = {
+  status?: string
+  providerId?: string
+  task?: string
+}
+
+type ImageGenerationProfile = {
+  promptSuffix: string
+  openAiSize: string
+  huggingFaceWidth: number
+  huggingFaceHeight: number
+}
+
+const DEFAULT_IMAGE_PROFILE: ImageGenerationProfile = {
+  promptSuffix: '',
+  openAiSize: '1024x1024',
+  huggingFaceWidth: 1024,
+  huggingFaceHeight: 1024,
+}
+
+const CARD_IMAGE_PROFILE: ImageGenerationProfile = {
+  promptSuffix:
+    'Use a vertical trading-card composition. Keep the subject centered and readable inside a 3:4 portrait safe area, with comfortable margins for a card frame.',
+  openAiSize: '1024x1536',
+  huggingFaceWidth: 896,
+  huggingFaceHeight: 1200,
+}
+
 function jsonResponse(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -123,6 +152,47 @@ function encodeModelPath(model: string) {
     .join('/')
 }
 
+async function resolveHuggingFaceTextToImageRoute(model: string) {
+  const modelPath = encodeModelPath(model)
+  const response = await fetch(`https://huggingface.co/api/models/${modelPath}?expand=inferenceProviderMapping`)
+  const payload = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      provider: 'hf-inference',
+      providerId: model,
+      debug: debugSummary(payload) ?? `HTTP ${response.status}`,
+    }
+  }
+
+  const mapping =
+    payload && typeof payload === 'object' && 'inferenceProviderMapping' in payload
+      ? (payload.inferenceProviderMapping as Record<string, HuggingFaceProviderMapping> | null)
+      : null
+
+  const candidates = Object.entries(mapping ?? {})
+    .filter(([, item]) => item?.status === 'live' && item?.task === 'text-to-image')
+    .map(([provider, item]) => ({
+      provider,
+      providerId: item?.providerId?.trim() || model,
+    }))
+
+  const selected =
+    candidates.find(candidate => candidate.provider === 'hf-inference') ??
+    candidates[0] ?? {
+      provider: 'hf-inference',
+      providerId: model,
+    }
+
+  return {
+    ok: true as const,
+    provider: selected.provider,
+    providerId: selected.providerId,
+    debug: debugSummary({ candidates }),
+  }
+}
+
 function getImageExtension(mimeType: string) {
   if (mimeType === 'image/jpeg') return 'jpg'
   if (mimeType === 'image/webp') return 'webp'
@@ -140,6 +210,10 @@ function normalizeTargetType(value: unknown): TargetType {
   return 'card'
 }
 
+function getImageGenerationProfile(targetType: TargetType): ImageGenerationProfile {
+  return targetType === 'card' ? CARD_IMAGE_PROFILE : DEFAULT_IMAGE_PROFILE
+}
+
 function resolveImageProvider(openAiApiKey: string, geminiApiKey: string, huggingFaceApiKey: string, configuredProvider: string) {
   if (configuredProvider === 'openai') return openAiApiKey ? 'openai' : null
   if (configuredProvider === 'gemini') return geminiApiKey ? 'gemini' : null
@@ -155,7 +229,12 @@ function resolveRequestProvider(provider: string, apiKey: string) {
   return apiKey && (provider === 'gemini' || provider === 'openai' || provider === 'huggingface') ? provider : null
 }
 
-async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: string): Promise<GenerationSuccess | GenerationFailure> {
+async function generateOpenAiImage(
+  prompt: string,
+  openAiApiKey: string,
+  model: string,
+  profile: ImageGenerationProfile
+): Promise<GenerationSuccess | GenerationFailure> {
   const imageResponse = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: {
@@ -165,7 +244,7 @@ async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: 
     body: JSON.stringify({
       model,
       prompt,
-      size: '1024x1024',
+      size: profile.openAiSize,
     }),
   })
 
@@ -187,50 +266,55 @@ async function generateOpenAiImage(prompt: string, openAiApiKey: string, model: 
   return { base64Image, mimeType: 'image/png', modelUsed: model }
 }
 
-async function generateHuggingFaceImage(prompt: string, huggingFaceApiKey: string, model: string): Promise<GenerationSuccess | GenerationFailure> {
-  const modelPath = encodeModelPath(model)
-  const imageResponse = await fetch(`https://router.huggingface.co/hf-inference/models/${modelPath}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${huggingFaceApiKey}`,
-      'Content-Type': 'application/json',
-      Accept: 'image/png',
-    },
-    body: JSON.stringify({
+async function generateHuggingFaceImage(
+  prompt: string,
+  huggingFaceApiKey: string,
+  model: string,
+  profile: ImageGenerationProfile
+): Promise<GenerationSuccess | GenerationFailure> {
+  const resolvedRoute = await resolveHuggingFaceTextToImageRoute(model)
+  const provider = resolvedRoute.provider === 'hf-inference' ? 'auto' : resolvedRoute.provider
+
+  try {
+    const client = new InferenceClient(huggingFaceApiKey)
+    const imageBlob = await client.textToImage({
+      model,
+      provider,
       inputs: prompt,
       parameters: {
-        width: 1024,
-        height: 1024,
-        num_inference_steps: 4,
+        width: profile.huggingFaceWidth,
+        height: profile.huggingFaceHeight,
       },
-    }),
-  })
+    })
 
-  const contentType = imageResponse.headers.get('content-type') ?? ''
-  if (!imageResponse.ok) {
-    const errorPayload = contentType.includes('application/json') ? await imageResponse.json() : await imageResponse.text()
+    const imageBytes = new Uint8Array(await imageBlob.arrayBuffer())
+
+    return {
+      base64Image: encodeBase64Image(imageBytes),
+      mimeType: imageBlob.type || 'image/png',
+      modelUsed: provider === 'auto' ? model : `${model} via ${provider}`,
+      debug: debugSummary({ route: resolvedRoute, provider, bytes: imageBytes.byteLength, mimeType: imageBlob.type || 'image/png' }),
+    }
+  } catch (error) {
     const message =
-      (typeof errorPayload === 'object' &&
-      errorPayload &&
-      'error' in errorPayload &&
-      typeof errorPayload.error === 'string'
-        ? errorPayload.error
-        : null) ?? 'Hugging Face image generation failed.'
+      error instanceof Error && error.message
+        ? error.message
+        : 'Hugging Face image generation failed.'
+
+    const status =
+      typeof error === 'object' &&
+      error &&
+      'status' in error &&
+      typeof (error as { status?: unknown }).status === 'number'
+        ? ((error as { status: number }).status)
+        : 502
 
     return {
       error: message,
-      status: imageResponse.status,
-      modelUsed: model,
-      debug: debugSummary(errorPayload),
+      status,
+      modelUsed: provider === 'auto' ? model : `${model} via ${provider}`,
+      debug: debugSummary({ route: resolvedRoute, provider, error }),
     }
-  }
-
-  const imageBytes = new Uint8Array(await imageResponse.arrayBuffer())
-  return {
-    base64Image: encodeBase64Image(imageBytes),
-    mimeType: contentType.split(';')[0] || 'image/png',
-    modelUsed: model,
-    debug: debugSummary({ contentType, bytes: imageBytes.byteLength }),
   }
 }
 
@@ -625,8 +709,8 @@ Deno.serve(async request => {
         activeProvider === 'gemini'
           ? await generateGeminiImage(probePrompt, geminiApiKey, geminiModel)
           : activeProvider === 'huggingface'
-            ? await generateHuggingFaceImage(probePrompt, huggingFaceApiKey, selectedModel ?? huggingFaceModel)
-            : await generateOpenAiImage(probePrompt, openAiApiKey, openAiModel)
+            ? await generateHuggingFaceImage(probePrompt, huggingFaceApiKey, selectedModel ?? huggingFaceModel, DEFAULT_IMAGE_PROFILE)
+            : await generateOpenAiImage(probePrompt, openAiApiKey, openAiModel, DEFAULT_IMAGE_PROFILE)
 
       if ('error' in probeResult) {
         return jsonResponse(
@@ -667,6 +751,7 @@ Deno.serve(async request => {
     let remoteRarity = ''
     let remoteCardColor = ''
     let remoteCardDescription = ''
+    const imageProfile = getImageGenerationProfile(normalizedTargetType)
 
     if (normalizedTargetType === 'card') {
       const { data: card, error: cardError } = await adminClient
@@ -697,6 +782,7 @@ Deno.serve(async request => {
         nextStyle,
         nextPrompt
       )
+      finalPrompt = `${finalPrompt} ${imageProfile.promptSuffix}`.trim()
       fileLabel = card.name || card.id
       fileFolder = 'cards'
       imageField = 'image_url'
@@ -779,6 +865,9 @@ Deno.serve(async request => {
         extra_prompt: nextPrompt,
         card_color: remoteCardColor,
         negative_prompt: remoteSettings.negative_prompt ?? '',
+        image_width: String(imageProfile.huggingFaceWidth),
+        image_height: String(imageProfile.huggingFaceHeight),
+        aspect_ratio: '3:4',
       }
 
       const remoteGeneration = await callRemoteGatewayGenerate(remoteSettings, {
@@ -836,8 +925,8 @@ Deno.serve(async request => {
       activeProvider === 'gemini'
         ? await generateGeminiImage(finalPrompt, geminiApiKey, geminiModel)
         : activeProvider === 'huggingface'
-          ? await generateHuggingFaceImage(finalPrompt, huggingFaceApiKey, selectedModel ?? huggingFaceModel)
-          : await generateOpenAiImage(finalPrompt, openAiApiKey, openAiModel)
+          ? await generateHuggingFaceImage(finalPrompt, huggingFaceApiKey, selectedModel ?? huggingFaceModel, imageProfile)
+          : await generateOpenAiImage(finalPrompt, openAiApiKey, openAiModel, imageProfile)
 
     if ('error' in generationResult) {
       return jsonResponse(
