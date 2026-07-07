@@ -686,8 +686,8 @@ Deno.serve(async request => {
         return jsonResponse({ error: '共享 ComfyUI 主機尚未完成設定。' }, 400)
       }
 
-      if (normalizedTargetType !== 'card') {
-        return jsonResponse({ error: '共享 ComfyUI 主機目前只支援卡牌生圖。' }, 400)
+      if (!normalizedTargetType) {
+        return jsonResponse({ error: 'Missing target type.' }, 400)
       }
     }
 
