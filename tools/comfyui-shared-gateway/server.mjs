@@ -27,6 +27,12 @@ function writeJson(response, statusCode, payload, origin = '*') {
 
 function replacePlaceholders(value, placeholders) {
   if (typeof value === 'string') {
+    const exactTokenMatch = value.match(/^\{\{([a-zA-Z0-9_]+)\}\}$/)
+    if (exactTokenMatch) {
+      const rawValue = placeholders[exactTokenMatch[1]]
+      return rawValue ?? ''
+    }
+
     return value.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, token) => String(placeholders[token] ?? ''))
   }
 

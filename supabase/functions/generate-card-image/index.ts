@@ -59,6 +59,8 @@ type RemoteAiSettingsRow = {
   shared_secret: string | null
   workflow_api_json: string
   negative_prompt: string
+  seed_mode: 'random' | 'fixed'
+  fixed_seed: number | null
   is_enabled: boolean
 }
 
@@ -394,7 +396,7 @@ async function generateGeminiImage(prompt: string, geminiApiKey: string, model: 
 async function loadRemoteAiSettings(adminClient: ReturnType<typeof createClient>) {
   const { data, error } = await adminClient
     .from('remote_ai_settings')
-    .select('provider, base_url, shared_secret, workflow_api_json, negative_prompt, is_enabled')
+    .select('provider, base_url, shared_secret, workflow_api_json, negative_prompt, seed_mode, fixed_seed, is_enabled')
     .eq('provider', 'comfyui_gateway')
     .maybeSingle()
 
@@ -403,6 +405,14 @@ async function loadRemoteAiSettings(adminClient: ReturnType<typeof createClient>
   }
 
   return (data ?? null) as RemoteAiSettingsRow | null
+}
+
+function generateRemoteSeed(settings: RemoteAiSettingsRow) {
+  if (settings.seed_mode === 'fixed' && Number.isFinite(settings.fixed_seed)) {
+    return Math.max(0, Math.floor(Number(settings.fixed_seed)))
+  }
+
+  return Math.floor(Math.random() * 9007199254740991)
 }
 
 async function callRemoteGatewayHealth(settings: RemoteAiSettingsRow) {
@@ -868,6 +878,7 @@ Deno.serve(async request => {
         image_width: String(imageProfile.huggingFaceWidth),
         image_height: String(imageProfile.huggingFaceHeight),
         aspect_ratio: '3:4',
+        seed: generateRemoteSeed(remoteSettings),
       }
 
       const remoteGeneration = await callRemoteGatewayGenerate(remoteSettings, {

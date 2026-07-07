@@ -351,6 +351,8 @@ export interface RemoteAiSettings {
   base_url: string
   workflow_api_json: string
   negative_prompt: string
+  seed_mode: 'random' | 'fixed'
+  fixed_seed: number | null
   is_enabled: boolean
   shared_secret_configured: boolean
   updated_at: string | null

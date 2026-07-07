@@ -14,6 +14,10 @@ const WORKFLOW_PLACEHOLDERS = [
   '{{extra_prompt}}',
   '{{card_color}}',
   '{{negative_prompt}}',
+  '{{image_width}}',
+  '{{image_height}}',
+  '{{aspect_ratio}}',
+  '{{seed}}',
 ] as const
 
 const DEFAULT_WORKFLOW_TEMPLATE = `{
@@ -40,6 +44,8 @@ type FormState = {
   sharedSecret: string
   workflowApiJson: string
   negativePrompt: string
+  seedMode: 'random' | 'fixed'
+  fixedSeed: string
   isEnabled: boolean
 }
 
@@ -49,6 +55,8 @@ function mapSettingsToForm(settings: RemoteAiSettings | null): FormState {
     sharedSecret: '',
     workflowApiJson: settings?.workflow_api_json || DEFAULT_WORKFLOW_TEMPLATE,
     negativePrompt: settings?.negative_prompt ?? '',
+    seedMode: settings?.seed_mode ?? 'random',
+    fixedSeed: settings?.fixed_seed !== null && settings?.fixed_seed !== undefined ? String(settings.fixed_seed) : '',
     isEnabled: settings?.is_enabled ?? false,
   }
 }
@@ -107,15 +115,28 @@ export default function TeacherRemoteAiPage() {
       const requestedSharedSecret = String(formData.get('sharedSecret') ?? '')
       const requestedWorkflowJson = String(formData.get('workflowApiJson') ?? '')
       const requestedNegativePrompt = String(formData.get('negativePrompt') ?? '')
+      const requestedSeedMode = String(formData.get('seedMode') ?? 'random') === 'fixed' ? 'fixed' : 'random'
+      const requestedFixedSeedRaw = String(formData.get('fixedSeed') ?? '').trim()
       const requestedIsEnabled = formData.get('isEnabled') === 'on'
+      const requestedFixedSeed =
+        requestedSeedMode === 'fixed'
+          ? requestedFixedSeedRaw === ''
+            ? null
+            : Number(requestedFixedSeedRaw)
+          : null
 
       JSON.parse(requestedWorkflowJson)
+      if (requestedSeedMode === 'fixed' && (!Number.isInteger(requestedFixedSeed) || requestedFixedSeed === null || requestedFixedSeed < 0)) {
+        throw new Error('固定 seed 必須是 0 以上的整數。')
+      }
 
       const nextSettings = await saveRemoteAiSettings({
         baseUrl: requestedBaseUrl,
         sharedSecret: requestedSharedSecret,
         workflowApiJson: requestedWorkflowJson,
         negativePrompt: requestedNegativePrompt,
+        seedMode: requestedSeedMode,
+        fixedSeed: requestedFixedSeed,
         isEnabled: requestedIsEnabled,
       })
 
@@ -133,6 +154,8 @@ export default function TeacherRemoteAiPage() {
         baseUrl: requestedBaseUrl,
         workflowApiJson: requestedWorkflowJson,
         negativePrompt: requestedNegativePrompt,
+        seedMode: requestedSeedMode,
+        fixedSeed: requestedSeedMode === 'fixed' ? requestedFixedSeedRaw : '',
         isEnabled: requestedIsEnabled,
         sharedSecret: '',
       }))
@@ -276,6 +299,58 @@ export default function TeacherRemoteAiPage() {
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white disabled:opacity-60"
             />
           </label>
+
+          <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+            <div>
+              <p className="text-sm text-slate-300">Seed 設定</p>
+              <p className="mt-1 text-xs text-slate-500">可切換固定 seed 或每次亂數。若 workflow 中有 <code>{'{{seed}}'}</code>，系統會自動代入。</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200">
+                <input
+                  type="radio"
+                  name="seedMode"
+                  value="random"
+                  checked={form.seedMode === 'random'}
+                  onChange={() => setForm(previous => ({ ...previous, seedMode: 'random' }))}
+                  disabled={!canEdit}
+                  className="accent-indigo-500"
+                />
+                每次亂數
+              </label>
+              <label className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200">
+                <input
+                  type="radio"
+                  name="seedMode"
+                  value="fixed"
+                  checked={form.seedMode === 'fixed'}
+                  onChange={() => setForm(previous => ({ ...previous, seedMode: 'fixed' }))}
+                  disabled={!canEdit}
+                  className="accent-indigo-500"
+                />
+                固定 seed
+              </label>
+            </div>
+
+            {form.seedMode === 'fixed' ? (
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">固定 seed 值</span>
+                <input
+                  name="fixedSeed"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.fixedSeed}
+                  onChange={event => setForm(previous => ({ ...previous, fixedSeed: event.target.value }))}
+                  disabled={!canEdit}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white disabled:opacity-60"
+                />
+              </label>
+            ) : (
+              <input type="hidden" name="fixedSeed" value="" />
+            )}
+          </div>
 
           <label className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-sm text-slate-300">
             <input

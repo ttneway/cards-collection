@@ -47,6 +47,8 @@ export async function saveRemoteAiSettings(input: {
   sharedSecret?: string
   workflowApiJson: string
   negativePrompt: string
+  seedMode: 'random' | 'fixed'
+  fixedSeed: number | null
   isEnabled: boolean
 }) {
   const { data, error } = await supabase.rpc('upsert_remote_ai_settings', {
@@ -55,6 +57,8 @@ export async function saveRemoteAiSettings(input: {
     p_shared_secret: input.sharedSecret?.trim() || null,
     p_workflow_api_json: input.workflowApiJson,
     p_negative_prompt: input.negativePrompt,
+    p_seed_mode: input.seedMode,
+    p_fixed_seed: input.fixedSeed,
     p_is_enabled: input.isEnabled,
   })
 
