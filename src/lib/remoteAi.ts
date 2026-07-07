@@ -14,7 +14,9 @@ export type RemoteAiGatewayHealth = {
 
 export type RemoteAiPreviewResult = {
   ok: boolean
-  card_id: string
+  target_id: string
+  target_type: 'card' | 'equipment' | 'profession'
+  card_id?: string
   provider: string
   provider_label: string
   preview_image_base64: string
@@ -79,15 +81,16 @@ export async function checkRemoteAiGateway() {
   return data as unknown as RemoteAiGatewayHealth
 }
 
-export async function generateRemoteCardPreview(input: {
-  cardId: string
+export async function generateRemoteImagePreview(input: {
+  targetType: 'card' | 'equipment' | 'profession'
+  targetId: string
   imagePrompt: string
   imageStyle: string
 }) {
   const result = await invokeAiImageFunction({
     action: 'remote_preview',
-    targetType: 'card',
-    targetId: input.cardId,
+    targetType: input.targetType,
+    targetId: input.targetId,
     imagePrompt: input.imagePrompt,
     imageStyle: input.imageStyle,
   })
@@ -103,6 +106,19 @@ export async function generateRemoteCardPreview(input: {
   }
 
   return data as unknown as RemoteAiPreviewResult
+}
+
+export async function generateRemoteCardPreview(input: {
+  cardId: string
+  imagePrompt: string
+  imageStyle: string
+}) {
+  return generateRemoteImagePreview({
+    targetType: 'card',
+    targetId: input.cardId,
+    imagePrompt: input.imagePrompt,
+    imageStyle: input.imageStyle,
+  })
 }
 
 export async function releaseRemoteAiModels() {

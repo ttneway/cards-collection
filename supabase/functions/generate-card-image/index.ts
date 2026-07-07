@@ -912,6 +912,8 @@ Deno.serve(async request => {
 
       return jsonResponse({
         ok: true,
+        target_id: resolvedTargetId,
+        target_type: normalizedTargetType,
         card_id: resolvedTargetId,
         provider: 'comfyui_gateway',
         provider_label: PROVIDER_LABELS.comfyui_gateway,
