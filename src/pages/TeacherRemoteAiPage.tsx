@@ -101,19 +101,28 @@ export default function TeacherRemoteAiPage() {
     setError(null)
 
     try {
+      const requestedWorkflowJson = form.workflowApiJson
       const nextSettings = await saveRemoteAiSettings({
         baseUrl: form.baseUrl,
         sharedSecret: form.sharedSecret,
-        workflowApiJson: form.workflowApiJson,
+        workflowApiJson: requestedWorkflowJson,
         negativePrompt: form.negativePrompt,
         isEnabled: form.isEnabled,
       })
 
       setSettings(nextSettings)
+      setForm(mapSettingsToForm(nextSettings))
+
+      if ((nextSettings?.workflow_api_json ?? '') !== requestedWorkflowJson) {
+        await refreshSettings()
+        setError('???????????? ComfyUI workflow ??????????????????')
+        return
+      }
+
       setForm(previous => ({ ...previous, sharedSecret: '' }))
-      setMessage('已更新共享 ComfyUI 主機設定。')
+      setMessage('????? ComfyUI ?????')
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '儲存共享生圖設定失敗。')
+      setError(saveError instanceof Error ? saveError.message : '???????????')
     } finally {
       setSaving(false)
     }
