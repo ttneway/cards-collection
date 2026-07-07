@@ -682,7 +682,7 @@ export default function TeacherProfessionsPage() {
               </div>
 
               <div className="mt-4 space-y-2 rounded-xl border border-slate-700 bg-slate-800/70 p-3 text-sm text-slate-300">
-                <p>AI ?????????????????????????????????</p>
+                <p>AI 會自動參考職業名稱、解鎖階段、主題與你的補充提示詞來生成職業圖片。</p>
                 <div className="flex flex-wrap gap-2">
                   {AI_SOURCE_OPTIONS.map(option => (
                     <button
@@ -705,11 +705,11 @@ export default function TeacherProfessionsPage() {
                     <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
                       <div className="flex items-center gap-2 text-sm font-medium text-white">
                         <KeyRound size={16} className="text-fuchsia-300" />
-                        ???? API key
+                        教師自備 API key
                       </div>
                       <div className="grid gap-3 sm:grid-cols-[0.7fr_1.3fr]">
                         <label className="space-y-1">
-                          <span className="text-xs text-slate-400">???</span>
+                          <span className="text-xs text-slate-400">提供者</span>
                           <select value={aiProvider} onChange={event => setAiProvider(event.target.value as typeof aiProvider)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
                             {AI_PROVIDER_OPTIONS.map(option => (
                               <option key={option.value} value={option.value}>
@@ -728,14 +728,14 @@ export default function TeacherProfessionsPage() {
                       {aiProvider === 'huggingface' ? (
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="space-y-1">
-                            <span className="text-xs text-slate-400">?? / ??</span>
+                            <span className="text-xs text-slate-400">作者 / 組織</span>
                             <input type="text" value={huggingFaceAuthor} onChange={event => setHuggingFaceAuthor(event.target.value)} autoComplete="off" spellCheck={false} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs text-slate-400">????</span>
+                            <span className="text-xs text-slate-400">模型名稱</span>
                             <input type="text" value={huggingFaceModelName} onChange={event => setHuggingFaceModelName(event.target.value)} autoComplete="off" spellCheck={false} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
                           </label>
-                          <p className="sm:col-span-2 text-xs text-slate-500">???????{huggingFaceModel}</p>
+                          <p className="sm:col-span-2 text-xs text-slate-500">目前模型路徑：{huggingFaceModel}</p>
                         </div>
                       ) : null}
                     </div>
@@ -744,26 +744,26 @@ export default function TeacherProfessionsPage() {
                       <div>
                         <p className={aiImageStatus?.ready ? 'text-emerald-200' : 'text-amber-200'}>
                           {aiImageStatus?.ready
-                            ? `???? ${aiImageStatus.provider_label}?${aiImageStatus.model}${aiImageStatus.key_source === 'teacher' ? '????? key?' : '??? Secret?'}`
-                            : `???? AI ?????${aiImageStatus?.missing_secret ?? '??????'}`}
+                            ? `目前使用 ${aiImageStatus.provider_label}：${aiImageStatus.model}${aiImageStatus.key_source === 'teacher' ? '（教師自備 key）' : '（系統 Secret）'}`
+                            : `尚未完成 AI 生圖設定：${aiImageStatus?.missing_secret ?? '請先設定金鑰'}`}
                         </p>
                       </div>
                       <button type="button" onClick={() => void loadAiImageStatus()} disabled={checkingAiStatus} className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-50">
                         <RefreshCw size={14} className={checkingAiStatus ? 'animate-spin' : ''} />
-                        ??
+                        重新整理
                       </button>
                     </div>
 
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => void probeAiImage()} disabled={probingAiImage} className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-900/40 px-3 py-2 text-xs text-fuchsia-200 hover:bg-fuchsia-900/60 disabled:opacity-50">
                         {probingAiImage ? <Sparkles size={14} className="animate-pulse" /> : <Wand2 size={14} />}
-                        {probingAiImage ? '???...' : '????'}
+                        {probingAiImage ? '檢查中...' : '測試生圖'}
                       </button>
                     </div>
 
                     {aiDiagnostics ? (
                       <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-                        <p className="mb-2 text-xs font-medium text-amber-200">AI ????</p>
+                        <p className="mb-2 text-xs font-medium text-amber-200">AI 診斷資訊</p>
                         <pre className="whitespace-pre-wrap break-words text-xs text-amber-100">{aiDiagnostics}</pre>
                       </div>
                     ) : null}
@@ -773,45 +773,45 @@ export default function TeacherProfessionsPage() {
                     <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
                       <div className="flex items-center gap-2 text-sm font-medium text-white">
                         <Server size={16} className="text-indigo-300" />
-                        ?? ComfyUI ??
+                        共享 ComfyUI 主機
                       </div>
-                      <p className="text-xs text-slate-400">?????????????? Gateway ?????????? ComfyUI workflow?</p>
+                      <p className="text-xs text-slate-400">這裡會使用教師後台統一設定的 Gateway 公開網址、共享金鑰與 ComfyUI workflow。</p>
                       <div className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300">
                         {loadingRemoteAiSettings
-                          ? '??????????...'
+                          ? '正在讀取共享生圖設定...'
                           : remoteAiSettings?.base_url
-                            ? `Gateway?${remoteAiSettings.base_url}`
-                            : '???? Gateway ????'}
+                            ? `Gateway：${remoteAiSettings.base_url}`
+                            : '尚未設定 Gateway 公開網址'}
                       </div>
                     </div>
 
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className={canUseRemoteAi ? 'text-emerald-200' : 'text-amber-200'}>
-                          {canUseRemoteAi ? '?? ComfyUI ????????' : '??????????????????'}
+                          {canUseRemoteAi ? '共享 ComfyUI 主機設定已就緒。' : '共享生圖主機尚未完成設定或尚未啟用。'}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
                           {!remoteAiSettings?.shared_secret_configured
-                            ? '?????????'
-                            : remoteAiHealth?.message ?? '????????????????'}
+                            ? '尚未設定共享金鑰。'
+                            : remoteAiHealth?.message ?? '尚未設定共享金鑰。請先檢查設定。'}
                         </p>
                       </div>
                       <button type="button" onClick={() => void testRemoteAiGateway()} disabled={testingRemoteAi} className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-50">
                         <RefreshCw size={14} className={testingRemoteAi ? 'animate-spin' : ''} />
-                        {testingRemoteAi ? '???' : '????'}
+                        {testingRemoteAi ? '測試中' : '測試連線'}
                       </button>
                     </div>
 
                     {remoteAiHealth ? (
                       <div className="grid gap-2 sm:grid-cols-3">
                         <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.configured ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-100' : 'border-slate-700 bg-slate-900/60 text-slate-300'}`}>
-                          ???{remoteAiHealth.configured ? '??' : '???'}
+                          設定：{remoteAiHealth.configured ? '完成' : '未完成'}
                         </div>
                         <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.gateway_reachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-rose-500/30 bg-rose-500/10 text-rose-100'}`}>
-                          Gateway?{remoteAiHealth.gateway_reachable ? '???' : '??'}
+                          Gateway：{remoteAiHealth.gateway_reachable ? '可連線' : '失敗'}
                         </div>
                         <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.comfyui_reachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100'}`}>
-                          ComfyUI?{remoteAiHealth.comfyui_reachable ? '??' : '???'}
+                          ComfyUI：{remoteAiHealth.comfyui_reachable ? '就緒' : '未就緒'}
                         </div>
                       </div>
                     ) : null}
@@ -820,17 +820,17 @@ export default function TeacherProfessionsPage() {
                       <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
                         <div className="flex items-center gap-2 text-xs font-medium text-emerald-100">
                           <CheckCircle2 size={14} />
-                          ????????
+                          已產生共享預覽圖
                         </div>
-                        <p className="mt-2 text-xs text-emerald-100/80">??????????????????</p>
+                        <p className="mt-2 text-xs text-emerald-100/80">確認預覽沒問題後，再套用到目前這張職業卡。</p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button type="button" onClick={() => void applyRemotePreview()} disabled={applyingRemotePreview} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
                             {applyingRemotePreview ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                            {applyingRemotePreview ? '???...' : '?????'}
+                            {applyingRemotePreview ? '套用中...' : '套用到職業'}
                           </button>
                           <button type="button" onClick={() => clearRemotePreview(true)} disabled={applyingRemotePreview} className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-xs text-slate-100 hover:bg-slate-600 disabled:opacity-50">
                             <X size={14} />
-                            ????
+                            捨棄預覽
                           </button>
                         </div>
                       </div>
@@ -914,7 +914,7 @@ export default function TeacherProfessionsPage() {
 
             <button type="button" onClick={() => void generateProfessionImage()} disabled={saving || generatingImage || !form.name.trim() || !form.code.trim() || !(aiSource === 'cloud' ? canUseAiImage : canUseRemoteAi)} className="rounded-xl bg-fuchsia-600 px-5 py-3 font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50">
               {generatingImage ? <Sparkles size={18} className="mr-2 inline animate-pulse" /> : <Wand2 size={18} className="mr-2 inline" />}
-              {generatingImage ? 'AI ???...' : aiSource === 'remote_comfyui' ? '????' : editingId ? '????????' : '????????'}
+              {generatingImage ? 'AI 生圖中...' : aiSource === 'remote_comfyui' ? '產生預覽' : editingId ? '更新並生成職業圖' : '建立並生成職業圖'}
             </button>
           </div>
         </form>
