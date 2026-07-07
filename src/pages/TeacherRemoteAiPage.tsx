@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, RefreshCw, Save, Server, Shield, Sparkles, Wifi } from 'lucide-react'
 import { checkRemoteAiGateway, loadRemoteAiSettings, saveRemoteAiSettings, type RemoteAiGatewayHealth } from '../lib/remoteAi'
 import { useAuthStore } from '../stores/authStore'
@@ -63,6 +63,7 @@ export default function TeacherRemoteAiPage() {
   const [testing, setTesting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const formRef = useRef<HTMLFormElement | null>(null)
 
   const canEdit = user?.role === 'admin'
   const configuredSummary = useMemo(() => {
@@ -92,7 +93,7 @@ export default function TeacherRemoteAiPage() {
     }
   }
 
-  async function handleSave(event: React.FormEvent) {
+  async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!canEdit) return
 
@@ -101,13 +102,21 @@ export default function TeacherRemoteAiPage() {
     setError(null)
 
     try {
-      const requestedWorkflowJson = form.workflowApiJson
+      const formData = new FormData(formRef.current ?? event.currentTarget)
+      const requestedBaseUrl = String(formData.get('baseUrl') ?? '').trim()
+      const requestedSharedSecret = String(formData.get('sharedSecret') ?? '')
+      const requestedWorkflowJson = String(formData.get('workflowApiJson') ?? '')
+      const requestedNegativePrompt = String(formData.get('negativePrompt') ?? '')
+      const requestedIsEnabled = formData.get('isEnabled') === 'on'
+
+      JSON.parse(requestedWorkflowJson)
+
       const nextSettings = await saveRemoteAiSettings({
-        baseUrl: form.baseUrl,
-        sharedSecret: form.sharedSecret,
+        baseUrl: requestedBaseUrl,
+        sharedSecret: requestedSharedSecret,
         workflowApiJson: requestedWorkflowJson,
-        negativePrompt: form.negativePrompt,
-        isEnabled: form.isEnabled,
+        negativePrompt: requestedNegativePrompt,
+        isEnabled: requestedIsEnabled,
       })
 
       setSettings(nextSettings)
@@ -119,10 +128,21 @@ export default function TeacherRemoteAiPage() {
         return
       }
 
-      setForm(previous => ({ ...previous, sharedSecret: '' }))
-      setMessage('????? ComfyUI ?????')
+      setForm(previous => ({
+        ...previous,
+        baseUrl: requestedBaseUrl,
+        workflowApiJson: requestedWorkflowJson,
+        negativePrompt: requestedNegativePrompt,
+        isEnabled: requestedIsEnabled,
+        sharedSecret: '',
+      }))
+      setMessage('已更新共享 ComfyUI 主機設定。')
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '???????????')
+      if (saveError instanceof SyntaxError) {
+        setError('ComfyUI API workflow JSON 格式不正確，請先確認內容是完整的 JSON。')
+      } else {
+        setError(saveError instanceof Error ? saveError.message : '儲存設定失敗。')
+      }
     } finally {
       setSaving(false)
     }
@@ -194,7 +214,7 @@ export default function TeacherRemoteAiPage() {
         ) : null}
       </section>
 
-      <form onSubmit={handleSave} className="space-y-5 rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
+      <form ref={formRef} onSubmit={handleSave} className="space-y-5 rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
         <div className="flex items-center gap-2 font-semibold text-white">
           <Shield size={18} className="text-fuchsia-300" />
           共用設定
@@ -210,6 +230,7 @@ export default function TeacherRemoteAiPage() {
           <label className="space-y-2">
             <span className="text-sm text-slate-300">Gateway 公開網址</span>
             <input
+              name="baseUrl"
               value={form.baseUrl}
               onChange={event => setForm(previous => ({ ...previous, baseUrl: event.target.value }))}
               placeholder="https://your-comfy-gateway.example.com"
@@ -221,6 +242,7 @@ export default function TeacherRemoteAiPage() {
           <label className="space-y-2">
             <span className="text-sm text-slate-300">共享金鑰</span>
             <input
+              name="sharedSecret"
               type="password"
               value={form.sharedSecret}
               onChange={event => setForm(previous => ({ ...previous, sharedSecret: event.target.value }))}
@@ -234,6 +256,7 @@ export default function TeacherRemoteAiPage() {
           <label className="space-y-2">
             <span className="text-sm text-slate-300">ComfyUI API workflow JSON</span>
             <textarea
+              name="workflowApiJson"
               value={form.workflowApiJson}
               onChange={event => setForm(previous => ({ ...previous, workflowApiJson: event.target.value }))}
               rows={16}
@@ -245,6 +268,7 @@ export default function TeacherRemoteAiPage() {
           <label className="space-y-2">
             <span className="text-sm text-slate-300">負面提示詞</span>
             <textarea
+              name="negativePrompt"
               value={form.negativePrompt}
               onChange={event => setForm(previous => ({ ...previous, negativePrompt: event.target.value }))}
               rows={3}
@@ -255,6 +279,7 @@ export default function TeacherRemoteAiPage() {
 
           <label className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-sm text-slate-300">
             <input
+              name="isEnabled"
               type="checkbox"
               checked={form.isEnabled}
               onChange={event => setForm(previous => ({ ...previous, isEnabled: event.target.checked }))}
