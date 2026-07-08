@@ -126,6 +126,7 @@ export default function TeacherRemoteAiPage() {
           : null
 
       JSON.parse(requestedWorkflowJson)
+
       if (requestedSeedMode === 'fixed' && (!Number.isInteger(requestedFixedSeed) || requestedFixedSeed === null || requestedFixedSeed < 0)) {
         throw new Error('固定 seed 必須是 0 以上的整數。')
       }
@@ -145,7 +146,7 @@ export default function TeacherRemoteAiPage() {
 
       if ((nextSettings?.workflow_api_json ?? '') !== requestedWorkflowJson) {
         await refreshSettings()
-        setError('???????????? ComfyUI workflow ??????????????????')
+        setError('儲存後讀回的 ComfyUI workflow 和你送出的內容不同，請重新檢查設定。')
         return
       }
 
@@ -159,6 +160,7 @@ export default function TeacherRemoteAiPage() {
         isEnabled: requestedIsEnabled,
         sharedSecret: '',
       }))
+
       setMessage('已更新共享 ComfyUI 主機設定。')
     } catch (saveError) {
       if (saveError instanceof SyntaxError) {
@@ -222,16 +224,16 @@ export default function TeacherRemoteAiPage() {
         {health ? (
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <div className={`rounded-xl border px-4 py-3 text-sm ${health.configured ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-100' : 'border-slate-700 bg-slate-900/70 text-slate-300'}`}>
-              <p className="font-medium">設定完成</p>
-              <p className="mt-1 text-xs">{health.configured ? '是' : '否'}</p>
+              <p className="font-medium">設定</p>
+              <p className="mt-1 text-xs">{health.configured ? '完成' : '未完成'}</p>
             </div>
             <div className={`rounded-xl border px-4 py-3 text-sm ${health.gateway_reachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-rose-500/30 bg-rose-500/10 text-rose-100'}`}>
               <p className="font-medium">Gateway</p>
-              <p className="mt-1 text-xs">{health.gateway_reachable ? '可連線' : '無法連線'}</p>
+              <p className="mt-1 text-xs">{health.gateway_reachable ? '可連線' : '失敗'}</p>
             </div>
             <div className={`rounded-xl border px-4 py-3 text-sm ${health.comfyui_reachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100'}`}>
               <p className="font-medium">ComfyUI</p>
-              <p className="mt-1 text-xs">{health.comfyui_reachable ? '運作中' : '尚未就緒'}</p>
+              <p className="mt-1 text-xs">{health.comfyui_reachable ? '就緒' : '未就緒'}</p>
             </div>
           </div>
         ) : null}
@@ -240,12 +242,12 @@ export default function TeacherRemoteAiPage() {
       <form ref={formRef} onSubmit={handleSave} className="space-y-5 rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
         <div className="flex items-center gap-2 font-semibold text-white">
           <Shield size={18} className="text-fuchsia-300" />
-          共用設定
+          管理設定
         </div>
 
         {!canEdit ? (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            目前只有管理者可以修改這組全校共用設定。教師可以查看狀態並在卡牌管理頁直接使用。
+            只有管理員可以修改這些共享生圖設定。一般教師可以使用，但不能更動全校共用的 Gateway、金鑰與 workflow。
           </div>
         ) : null}
 
