@@ -1,240 +1,160 @@
-# ComfyUI 串接卡牌系統設定說明
+# 共享 ComfyUI 主機與固定 Tunnel 設定說明
 
-這份文件是記錄目前「卡牌系統」如何串接這台電腦上的 ComfyUI，避免之後忘記。
+這份文件記錄目前卡牌系統如何串接這台電腦上的 ComfyUI，以及如何把共享生圖入口改成固定可用的網址。
 
 ## 1. 目前架構
 
-目前卡牌系統的共享生圖，不是直接連到你平常操作的 ComfyUI 視窗，而是拆成兩層：
+目前共享生圖流程如下：
 
-1. `卡牌專用 ComfyUI 後端`
-2. `共享 Gateway`
+1. 卡牌網站前端呼叫共享生圖 Gateway
+2. Gateway 驗證共享金鑰與 workflow
+3. Gateway 轉送請求到這台電腦上的 ComfyUI
+4. Gateway 取回圖片後再回傳給網站
 
-流程如下：
+目前本機服務：
 
-`卡牌網站`
--> `共享 Gateway`
--> `卡牌專用 ComfyUI 後端`
--> 回傳圖片給卡牌網站
+- ComfyUI：`http://127.0.0.1:8188`
+- 共享 Gateway：`http://127.0.0.1:8787`
 
-這樣做的原因是：
+目前資料庫中的共享生圖設定 `provider = comfyui_gateway`。
 
-- 比較不容易被你平常 Comfy Desktop 的外掛干擾
-- 比較適合給 GitHub Pages / Supabase Edge Function 穩定呼叫
-- 能把共享金鑰、健康檢查、錯誤處理集中在 Gateway
+## 2. 目前使用的 ComfyUI
 
-## 2. 目前使用中的元件
+目前共用生圖主機是使用這台電腦上的原生 ComfyUI，不是 Stability Matrix 版。
 
-### 2.1 你平常操作的 ComfyUI
+已確認的 ComfyUI 路徑與環境：
 
-你平常使用的是 `Comfy Desktop`，不是 Stability Matrix 內建的那一份。
+- ComfyUI 工作目錄：`C:\Users\ttn\Documents\ComfyUI`
+- Gateway 程式：`D:\codexTEST\card\cards-collection\tools\comfyui-shared-gateway\server.mjs`
 
-- 程式位置：
-  `C:\Users\ttn\AppData\Local\Programs\@comfyorgcomfyui-electron\Comfy Desktop.exe`
-- 使用資料夾：
-  `C:\Users\ttn\Documents\ComfyUI`
+## 3. 目前使用的模型與 workflow
 
-### 2.2 卡牌專用 ComfyUI 後端
+共享生圖目前走的是可替換的 ComfyUI API workflow JSON。
 
-卡牌系統目前是另外開一個「精簡版後端」給共享生圖使用：
+你目前常用的卡牌 workflow 相關檔案：
 
-- 本機網址：
-  `http://127.0.0.1:8188`
-- 啟動方式：
-  使用 ComfyUI 主程式直接啟動
-- 特性：
-  加上 `--disable-all-custom-nodes`
+- 工作流範例：`D:\codexTEST\card\cards-collection\docs\qwen-image-4steps-card-api.json`
+- 你提供的 workflow 參考：`C:\Users\ttn\Downloads\(Qwen-Imgae四步生圖)qwen-image-4steps.json`
 
-也就是說，卡牌系統目前的共享生圖，**不吃你平常桌面版那些 custom nodes**。
+目前系統已支援以下 placeholder：
 
-這是目前刻意這樣設計的，目的就是求穩定。
+- `{{full_prompt}}`
+- `{{card_name}}`
+- `{{card_description}}`
+- `{{album_name}}`
+- `{{rarity}}`
+- `{{image_style}}`
+- `{{extra_prompt}}`
+- `{{card_color}}`
+- `{{negative_prompt}}`
+- `{{image_width}}`
+- `{{image_height}}`
+- `{{aspect_ratio}}`
+- `{{seed}}`
 
-### 2.3 共享 Gateway
+其中 `{{seed}}` 已可在網頁端設定為固定值或亂數值。
 
-- 程式位置：
-  [tools/comfyui-shared-gateway/server.mjs](D:\codexTEST\card\cards-collection\tools\comfyui-shared-gateway\server.mjs)
-- 本機網址：
-  `http://127.0.0.1:8787`
-- 對外公開網址：
-  `https://shaw-pos-ann-suggestions.trycloudflare.com`
+## 4. 目前固定網址的狀態
 
-Gateway 作用：
+目前狀態分成兩種：
 
-- 驗證共享金鑰
-- 對卡牌網站提供固定 API
-- 幫忙呼叫 ComfyUI `/prompt`、`/history`、`/view`
-- 把生成結果整理後回傳
+### 4.1 臨時可用入口
 
-## 3. 目前卡牌系統使用的模型
+現在共享生圖可以透過 Cloudflare 的臨時 Tunnel 對外提供服務。
 
-目前共享生圖用的是 `Qwen Image` 這組模型：
+這種網址可以用，但有兩個缺點：
 
-- UNET：
-  `qwen_image_fp8_e4m3fn.safetensors`
-- 文字編碼：
-  `qwen_2.5_vl_7b_fp8_scaled.safetensors`
-- VAE：
-  `qwen_image_vae.safetensors`
+- 每次重開後網址可能改變
+- 不適合當正式固定入口
 
-模型位置都在：
+### 4.2 固定入口目標
 
-- `C:\Users\ttn\Documents\ComfyUI\models\diffusion_models`
-- `C:\Users\ttn\Documents\ComfyUI\models\text_encoders`
-- `C:\Users\ttn\Documents\ComfyUI\models\vae`
+要完成的正式入口是：
 
-## 4. 目前卡牌系統使用的工作流
+- `https://ttneway.ddns.net`
 
-這不是直接使用 ComfyUI 畫面裡某個現成 `.json` 工作流，而是為了 API 串接整理出來的精簡 workflow。
+目前已確認：
 
-核心節點如下：
+- `ttneway.ddns.net` 已解析到這台電腦目前的公開 IP：`210.240.38.81`
+- 但外部目前還無法直接透過 `https://ttneway.ddns.net` 連到共享 Gateway
 
-1. `UNETLoader`
-2. `CLIPLoader`
-3. `VAELoader`
-4. `ModelSamplingAuraFlow`
-5. `CLIPTextEncode` 正向
-6. `CLIPTextEncode` 負向
-7. `EmptySD3LatentImage`
-8. `KSampler`
-9. `VAEDecode`
-10. `SaveImage`
+原因不是網址錯，而是固定 Tunnel 憑證還沒有完整落地。
 
-目前設定：
+## 5. 現在卡住的最後一步
 
-- 尺寸：`1024 x 1024`
-- Steps：`20`
-- CFG：`3`
-- Sampler：`euler`
-- Scheduler：`simple`
-- Shift：`3.1`
+Cloudflare `tunnel login` 已經進行到最後，但它回報：
 
-實際 workflow 內容目前儲存在 Supabase 的 `remote_ai_settings.workflow_api_json` 欄位中。
+- 瀏覽器應該已下載 Cloudflare 憑證
+- 需要手動把憑證放到：
+  `C:\Users\ttn\.cloudflared\cert.pem`
 
-## 5. 卡牌系統裡的設定位置
+也就是說，現在最缺的不是程式碼，而是這一個檔案：
 
-前端頁面：
+- `C:\Users\ttn\.cloudflared\cert.pem`
 
-- [src/pages/TeacherRemoteAiPage.tsx](D:\codexTEST\card\cards-collection\src\pages\TeacherRemoteAiPage.tsx)
+只要這個檔案到位，就能建立 Named Tunnel，並把 `ttneway.ddns.net` 真正綁定到共享生圖 Gateway。
 
-前端呼叫：
+## 6. 固定 Tunnel 完成後要做的事
 
-- [src/lib/remoteAi.ts](D:\codexTEST\card\cards-collection\src\lib\remoteAi.ts)
+拿到 `cert.pem` 後，接下來會做這幾步：
 
-Edge Function：
+1. 建立 Cloudflare Named Tunnel
+2. 將 `ttneway.ddns.net` 綁到該 Tunnel
+3. 建立本機 Cloudflare 設定檔
+4. 讓 Tunnel 指向本機 Gateway `http://127.0.0.1:8787`
+5. 驗證外部 `https://ttneway.ddns.net/health`
+6. 把資料庫中的共享生圖網址更新成 `https://ttneway.ddns.net`
 
-- [supabase/functions/generate-card-image/index.ts](D:\codexTEST\card\cards-collection\supabase\functions\generate-card-image\index.ts)
+## 7. 固定 Tunnel 設定檔模板
 
-資料表 / migration：
+已準備好的模板檔案：
 
-- [supabase/migrations/00039_remote_ai_gateway_settings.sql](D:\codexTEST\card\cards-collection\supabase\migrations\00039_remote_ai_gateway_settings.sql)
+- `D:\codexTEST\card\cards-collection\tools\cloudflared\fixed-tunnel-config.example.yml`
 
-## 6. 目前已寫入資料庫的設定
+正式啟用時，會依實際 Tunnel UUID 改成類似下面內容：
 
-目前 `remote_ai_settings` 已啟用，主要內容如下：
+```yaml
+tunnel: <TUNNEL-UUID>
+credentials-file: C:\Users\ttn\.cloudflared\<TUNNEL-UUID>.json
 
-- provider：`comfyui_gateway`
-- base_url：`https://shaw-pos-ann-suggestions.trycloudflare.com`
-- is_enabled：`true`
-
-共享金鑰有設定，但**不在這份 md 檔明文記錄**，避免之後被一起同步到 GitHub。
-
-如果之後要查目前有沒有設定成功，可用：
-
-```sql
-select provider, base_url, is_enabled, shared_secret is not null as has_secret
-from public.remote_ai_settings
-where provider = 'comfyui_gateway';
+ingress:
+  - hostname: ttneway.ddns.net
+    service: http://127.0.0.1:8787
+  - service: http_status:404
 ```
 
-## 7. 這次做過的清理
+## 8. 共享 Gateway 的健康檢查
 
-### 7.1 已處理
+Gateway 健康檢查：
 
-- `ComfyUI-DeepSeek-OCR` 殘留已移出主 `custom_nodes`
-- `matplotlib` 已補裝
+- `GET /health`
 
-### 7.2 目前仍可能看到的外掛警告
+生圖 API：
 
-你平常的 Comfy Desktop 仍可能出現一些與外掛相依套件有關的警告，例如：
+- `POST /generate`
 
-- `skimage`
-- `hydra`
-- `iopath`
-- `segment_anything`
-- `argostranslate`
+目前本機可用健康檢查位置：
 
-這些目前**不影響卡牌系統的共享生圖**，因為卡牌系統現在走的是 `--disable-all-custom-nodes` 的精簡後端。
+- `http://127.0.0.1:8787/health`
 
-## 8. 啟動順序建議
+## 9. 目前已完成的相關事項
 
-如果之後整台電腦重開，建議順序：
+目前已完成：
 
-1. 開 Comfy Desktop（你平常用的）
-2. 開卡牌專用 ComfyUI 後端（8188）
-3. 開共享 Gateway（8787）
-4. 開 Cloudflare Tunnel
-5. 到卡牌系統「共享生圖主機」頁按一次「測試連線」
+- 共享生圖設定頁建立
+- 管理員限定可編輯共享生圖設定
+- `workflow_api_json` 可儲存
+- seed 固定值 / 亂數值設定
+- Gateway 支援 `{{seed}}`
+- Gateway 支援閒置 5 分鐘後釋放 ComfyUI 模型記憶體
+- 卡牌頁面可透過共享 ComfyUI 主機生成預覽圖
 
-## 9. 目前最大注意事項
+## 10. 下一步
 
-### 9.1 對外網址是暫時的
+下一步只差一件事：
 
-現在用的是 `trycloudflare.com` 的臨時 Tunnel：
+把 Cloudflare 下載的憑證檔放到：
 
-- 電腦重開後可能失效
-- cloudflared 關掉後會失效
-- 不適合長期正式使用
+- `C:\Users\ttn\.cloudflared\cert.pem`
 
-如果要長期穩定，之後應改成：
-
-1. Cloudflare Named Tunnel
-2. 固定網域或固定子網域
-
-### 9.2 共享生圖成功，不代表桌面版一定穩
-
-目前卡牌系統穩定，靠的是：
-
-- 精簡後端
-- 關閉 custom nodes
-
-所以這一套的重點是「給卡牌網站穩定生圖」，不是完整複製你平常桌面上的所有工作流環境。
-
-## 10. 之後如果要改模型
-
-如果之後要換共享生圖模型，通常要改的是 `remote_ai_settings.workflow_api_json` 裡的：
-
-- `UNETLoader`
-- `CLIPLoader`
-- `VAELoader`
-- 可能還有採樣節點參數
-
-如果換成別的模型族系，workflow 也常常要一起改，不一定只是換檔名。
-
-## 11. 之後如果要改回直接吃桌面版
-
-不建議直接改，但如果真的要改，方向會是：
-
-- 不使用 `--disable-all-custom-nodes`
-- 直接讓 Gateway 指到桌面版 ComfyUI 的 port
-
-缺點是：
-
-- 比較容易被外掛衝到
-- 啟動較慢
-- 出錯來源更難查
-
-## 12. 目前狀態摘要
-
-截至這次整理為止：
-
-- 共享 Gateway：已可用
-- 對外 Tunnel：已可用
-- 卡牌系統資料庫設定：已寫入
-- 共享生圖健康檢查：已通過
-- 真實生圖測試：已成功
-
-## 13. 建議下一步
-
-之後最值得做的兩件事：
-
-1. 把 `trycloudflare` 改成固定 Tunnel
-2. 在教師後台做一個「查看目前共享生圖設定摘要」區塊，讓你不用每次進資料庫查
+完成後，就可以繼續把 `ttneway.ddns.net` 做成真正固定可用的共享生圖入口。

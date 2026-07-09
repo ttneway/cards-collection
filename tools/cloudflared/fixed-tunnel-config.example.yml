@@ -1,0 +1,7 @@
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: C:\Users\ttn\.cloudflared\REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: ttneway.ddns.net
+    service: http://127.0.0.1:8787
+  - service: http_status:404
