@@ -158,3 +158,69 @@ Gateway 健康檢查：
 - `C:\Users\ttn\.cloudflared\cert.pem`
 
 完成後，就可以繼續把 `ttneway.ddns.net` 做成真正固定可用的共享生圖入口。
+
+## 11. `ttneway.ddns.net` 直連版現況
+
+後來已確認 `ttneway.ddns.net` 不是 Cloudflare 帳號內可管理的 Zone，
+所以固定入口改走直連版，而不是 Cloudflare Named Tunnel。
+
+目前已完成：
+
+- 本機反向代理已改用 Caddy
+- 設定檔：`D:\codexTEST\card\cards-collection\tools\caddy\Caddyfile`
+- 啟動腳本：`D:\codexTEST\card\cards-collection\tools\caddy\start-direct-gateway.ps1`
+- 停止腳本：`D:\codexTEST\card\cards-collection\tools\caddy\stop-direct-gateway.ps1`
+- 檢查腳本：`D:\codexTEST\card\cards-collection\tools\caddy\check-direct-gateway.ps1`
+
+目前 Caddy 已能在本機監聽：
+
+- `80`
+- `443`
+
+而且已經開始向 Let's Encrypt 申請 `ttneway.ddns.net` 的正式憑證。
+
+## 12. 直連版目前卡住的地方
+
+Let's Encrypt 的驗證目前失敗，錯誤重點是：
+
+- `210.240.38.81: Fetching http://ttneway.ddns.net/.well-known/acme-challenge/...: Timeout during connect`
+
+這代表外部網路還打不進來，常見原因只有兩個：
+
+1. 路由器沒有把 `80` / `443` 轉發到這台電腦
+2. Windows 防火牆還沒有放行 `80` / `443`
+
+## 13. 直連版還需要你完成的事
+
+### 13.1 Windows 防火牆
+
+因為目前這個 Codex 工作階段不是系統管理員權限，所以無法直接幫你加防火牆規則。
+
+已準備腳本：
+
+- `D:\codexTEST\card\cards-collection\tools\caddy\setup-direct-gateway-firewall.ps1`
+
+請用系統管理員 PowerShell 執行它。
+
+### 13.2 路由器 Port Forward
+
+你家裡或學校的路由器需要把以下連接埠轉到這台電腦：
+
+- 外部 TCP `80` -> 這台電腦內部 IP 的 `80`
+- 外部 TCP `443` -> 這台電腦內部 IP 的 `443`
+
+這台電腦目前區網 IP 是：
+
+- `10.102.3.64`
+
+如果路由器之後改配發新 IP，轉發規則也要一起更新，或改成 DHCP 保留固定 IP。
+
+## 14. 完成後如何驗證
+
+當防火牆與路由器都設定完成後，可重新執行：
+
+- `D:\codexTEST\card\cards-collection\tools\caddy\check-direct-gateway.ps1`
+
+若成功，Caddy 會取得正式憑證，之後外部就能使用：
+
+- `https://ttneway.ddns.net/health`
