@@ -23,8 +23,10 @@ try {
 Start-Sleep -Seconds 5
 
 try {
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $tunnelScript | Out-Null
-  Write-Log 'Tunnel start script finished.'
+  Start-Process powershell `
+    -ArgumentList '-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',$tunnelScript `
+    -WindowStyle Hidden
+  Write-Log 'Tunnel start script launched in background.'
 } catch {
   Write-Log "Tunnel start failed: $($_.Exception.Message)"
 }
