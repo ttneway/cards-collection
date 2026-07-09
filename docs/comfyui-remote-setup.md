@@ -224,3 +224,22 @@ Let's Encrypt 的驗證目前失敗，錯誤重點是：
 若成功，Caddy 會取得正式憑證，之後外部就能使用：
 
 - `https://ttneway.ddns.net/health`
+
+## 15. 建議回退方案：自動同步的 trycloudflare Tunnel
+
+如果目前網路環境無法自行設定路由器轉發，建議回到 Tunnel 方案。
+
+這個方案不保證網址永遠固定，但可以做到：
+
+1. 本機啟動 `cloudflared quick tunnel`
+2. 自動抓出新的 `https://*.trycloudflare.com`
+3. 自動把 `remote_ai_settings.base_url` 更新到 Supabase
+4. 教師端重新整理後就會使用新的共享生圖網址
+
+相關腳本：
+
+- `D:\codexTEST\card\cards-collection\tools\cloudflared\start-shared-tunnel.ps1`
+- `D:\codexTEST\card\cards-collection\tools\cloudflared\check-shared-tunnel.ps1`
+- `D:\codexTEST\card\cards-collection\tools\cloudflared\stop-shared-tunnel.ps1`
+
+這個版本會強制使用 `HTTP/2`，避免目前網路對 `QUIC/7844` 的限制造成 quick tunnel 不穩。
