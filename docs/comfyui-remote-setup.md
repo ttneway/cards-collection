@@ -243,3 +243,27 @@ Let's Encrypt 的驗證目前失敗，錯誤重點是：
 - `D:\codexTEST\card\cards-collection\tools\cloudflared\stop-shared-tunnel.ps1`
 
 這個版本會強制使用 `HTTP/2`，避免目前網路對 `QUIC/7844` 的限制造成 quick tunnel 不穩。
+
+## 16. 開機自動啟動 shared tunnel + gateway
+
+目前已設定使用者登入 Windows 後自動啟動共享生圖服務。
+
+啟動流程：
+
+1. 先啟動本機 Gateway
+2. 再啟動 `cloudflared quick tunnel`
+3. 抓到新的 `trycloudflare` 網址後，自動更新 Supabase 的 `remote_ai_settings.base_url`
+
+相關腳本：
+
+- Gateway 啟動：`D:\codexTEST\card\cards-collection\tools\comfyui-shared-gateway\start-gateway.ps1`
+- Gateway 檢查：`D:\codexTEST\card\cards-collection\tools\comfyui-shared-gateway\check-gateway.ps1`
+- Gateway 停止：`D:\codexTEST\card\cards-collection\tools\comfyui-shared-gateway\stop-gateway.ps1`
+- 開機總啟動：`D:\codexTEST\card\cards-collection\tools\startup\start-shared-ai-stack.ps1`
+- 開機入口：`D:\codexTEST\card\cards-collection\tools\startup\start-shared-ai-stack.cmd`
+
+Windows 啟動資料夾中的實際入口：
+
+- `C:\Users\ttn\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\start-shared-ai-stack.cmd`
+
+若之後要取消開機自動啟動，只要刪除上面這個 Startup 資料夾中的 `start-shared-ai-stack.cmd` 即可。

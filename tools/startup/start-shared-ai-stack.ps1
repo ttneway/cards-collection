@@ -1,0 +1,30 @@
+$ErrorActionPreference = 'Stop'
+
+$repoRoot = 'D:\codexTEST\card\cards-collection'
+$gatewayScript = Join-Path $repoRoot 'tools\comfyui-shared-gateway\start-gateway.ps1'
+$tunnelScript = Join-Path $repoRoot 'tools\cloudflared\start-shared-tunnel.ps1'
+$startupLog = Join-Path $repoRoot 'tools\startup\startup.log'
+
+function Write-Log($message) {
+  $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+  Add-Content -LiteralPath $startupLog -Value "[$timestamp] $message"
+}
+
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $startupLog) | Out-Null
+Write-Log 'Starting shared AI stack.'
+
+try {
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $gatewayScript | Out-Null
+  Write-Log 'Gateway start script finished.'
+} catch {
+  Write-Log "Gateway start failed: $($_.Exception.Message)"
+}
+
+Start-Sleep -Seconds 5
+
+try {
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $tunnelScript | Out-Null
+  Write-Log 'Tunnel start script finished.'
+} catch {
+  Write-Log "Tunnel start failed: $($_.Exception.Message)"
+}
