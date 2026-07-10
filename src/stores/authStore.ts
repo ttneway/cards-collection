@@ -178,6 +178,7 @@ async function getOrCreateProfile(userId: string): Promise<Profile> {
     email: userData.user.email ?? '',
     name: userData.user.user_metadata?.name ?? userData.user.email?.split('@')[0] ?? '未命名使用者',
     role: 'student',
+    gender: null,
     title: null,
     stars: 0,
     class_id: null,

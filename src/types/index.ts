@@ -1,4 +1,5 @@
 export type Role = 'student' | 'leader' | 'teacher' | 'admin'
+export type CharacterGender = 'male' | 'female'
 
 export type Rarity = 'N' | 'R' | 'SR' | 'SSR' | 'UR'
 
@@ -36,6 +37,7 @@ export interface Profile {
   name: string
   student_id: string | null
   role: Role
+  gender: CharacterGender | null
   title: string | null
   class_id: string | null
   stars: number
@@ -293,6 +295,8 @@ export interface ProfessionTemplate {
   description: string
   theme_color: string
   icon_url: string | null
+  icon_url_male: string | null
+  icon_url_female: string | null
   image_prompt: string | null
   image_style: string | null
   unlock_tier: number

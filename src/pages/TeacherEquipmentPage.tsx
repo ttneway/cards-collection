@@ -762,6 +762,13 @@ export default function TeacherEquipmentPage() {
                         <KeyRound size={16} className="text-fuchsia-300" />
                         教師自備 API key
                       </div>
+                      <p className="text-xs text-slate-400">
+                        不確定怎麼填時，可查看
+                        <a href="/teacher/help#ai-image" className="ml-1 text-indigo-300 hover:text-indigo-200">
+                          教師後台說明
+                        </a>
+                        。
+                      </p>
                       <div className="grid gap-3 sm:grid-cols-[0.7fr_1.3fr]">
                         <label className="space-y-1">
                           <span className="text-xs text-slate-400">提供者</span>

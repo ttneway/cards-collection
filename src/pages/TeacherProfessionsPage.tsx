@@ -9,7 +9,7 @@ import {
   type AiDiagnostics,
   type AiImageStatus,
 } from '../lib/aiImage'
-import { uploadGeneratedImageBlob } from '../lib/imageUpload'
+import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
 import { checkRemoteAiGateway, generateRemoteImagePreview, loadRemoteAiSettings, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
 import { supabase } from '../lib/supabase'
 import { EFFECT_LABELS, STYLE_OPTIONS, formatEffectValue, getBalanceWarnings, getTierLabel } from '../lib/character'
@@ -33,6 +33,8 @@ type ProfessionForm = {
   description: string
   theme_color: string
   icon_url: string
+  icon_url_male: string
+  icon_url_female: string
   image_prompt: string
   image_style: string
   unlock_tier: number
@@ -72,6 +74,8 @@ const emptyForm: ProfessionForm = {
   description: '',
   theme_color: '#6366f1',
   icon_url: '',
+  icon_url_male: '',
+  icon_url_female: '',
   image_prompt: '',
   image_style: STYLE_OPTIONS[0],
   unlock_tier: 1,
@@ -340,6 +344,8 @@ export default function TeacherProfessionsPage() {
       description: profession.description ?? '',
       theme_color: profession.theme_color,
       icon_url: profession.icon_url ?? '',
+      icon_url_male: profession.icon_url_male ?? '',
+      icon_url_female: profession.icon_url_female ?? '',
       image_prompt: profession.image_prompt ?? '',
       image_style: profession.image_style ?? STYLE_OPTIONS[0],
       unlock_tier: profession.unlock_tier,
@@ -369,6 +375,8 @@ export default function TeacherProfessionsPage() {
       description: form.description.trim(),
       theme_color: form.theme_color,
       icon_url: form.icon_url.trim() || null,
+      icon_url_male: form.icon_url_male.trim() || null,
+      icon_url_female: form.icon_url_female.trim() || null,
       image_prompt: form.image_prompt.trim() || null,
       image_style: form.image_style.trim() || null,
       unlock_tier: form.unlock_tier,
@@ -434,6 +442,27 @@ export default function TeacherProfessionsPage() {
       setError(saveError instanceof Error ? saveError.message : '職業儲存失敗。')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleProfessionImageUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+    field: 'icon_url' | 'icon_url_male' | 'icon_url_female'
+  ) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setMessage(null)
+    setError(null)
+
+    try {
+      const result = await uploadImageFile(file, 'professions')
+      setForm(previous => ({ ...previous, [field]: result.publicUrl }))
+      setMessage('職業圖片上傳完成。')
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : '職業圖片上傳失敗。')
+    } finally {
+      event.target.value = ''
     }
   }
 
@@ -640,6 +669,43 @@ export default function TeacherProfessionsPage() {
               </label>
 
               <label className="space-y-2">
+                <span className="text-sm text-slate-300">男生職業圖片</span>
+                <input value={form.icon_url_male} onChange={event => setForm(previous => ({ ...previous, icon_url_male: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white" />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">女生職業圖片</span>
+                <input value={form.icon_url_female} onChange={event => setForm(previous => ({ ...previous, icon_url_female: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white" />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">上傳預設圖片</span>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600 bg-slate-900 px-4 py-3 text-sm text-slate-200 hover:border-indigo-400 hover:text-white">
+                  <ImagePlus size={16} />
+                  上傳圖片
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void handleProfessionImageUpload(event, 'icon_url')} className="hidden" />
+                </label>
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">上傳男生圖片</span>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600 bg-slate-900 px-4 py-3 text-sm text-slate-200 hover:border-indigo-400 hover:text-white">
+                  <ImagePlus size={16} />
+                  上傳圖片
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void handleProfessionImageUpload(event, 'icon_url_male')} className="hidden" />
+                </label>
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">上傳女生圖片</span>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600 bg-slate-900 px-4 py-3 text-sm text-slate-200 hover:border-indigo-400 hover:text-white">
+                  <ImagePlus size={16} />
+                  上傳圖片
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void handleProfessionImageUpload(event, 'icon_url_female')} className="hidden" />
+                </label>
+              </label>
+
+              <label className="space-y-2">
                 <span className="text-sm text-slate-300">AI 風格模板</span>
                 <select value={form.image_style} onChange={event => setForm(previous => ({ ...previous, image_style: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white">
                   {STYLE_OPTIONS.map(option => (
@@ -707,6 +773,13 @@ export default function TeacherProfessionsPage() {
                         <KeyRound size={16} className="text-fuchsia-300" />
                         教師自備 API key
                       </div>
+                      <p className="text-xs text-slate-400">
+                        不確定怎麼填時，可查看
+                        <a href="/teacher/help#ai-image" className="ml-1 text-indigo-300 hover:text-indigo-200">
+                          教師後台說明
+                        </a>
+                        。
+                      </p>
                       <div className="grid gap-3 sm:grid-cols-[0.7fr_1.3fr]">
                         <label className="space-y-1">
                           <span className="text-xs text-slate-400">提供者</span>

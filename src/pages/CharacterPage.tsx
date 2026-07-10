@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Crown, Shield, ShoppingBag, Star, Wand2 } from 'lucide-react'
+import { resolveProfessionImageUrl } from '../lib/professionImages'
 import { supabase } from '../lib/supabase'
 import { EFFECT_LABELS, SLOT_LABELS, formatEffectValue, formatEquipmentRarity, getTierLabel } from '../lib/character'
 import { useAuthStore } from '../stores/authStore'
 import type {
+  CharacterGender,
   CharacterProfilePayload,
   ComputedCharacterBonus,
   EquipmentSlotType,
@@ -11,6 +13,7 @@ import type {
   PlayerEquipment,
   PlayerEquippedItem,
   PlayerProfession,
+  ProfessionEffectType,
 } from '../types'
 
 type InventoryRow = PlayerEquipment & {
@@ -34,6 +37,7 @@ export default function CharacterPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [savingGender, setSavingGender] = useState(false)
 
   const equippedMap = useMemo(() => {
     return equippedItems.reduce<Record<string, PlayerEquippedItem>>((accumulator, item) => {
@@ -121,11 +125,27 @@ export default function CharacterPage() {
     if (error) {
       setError(error.message)
     } else {
-      setMessage(data?.message ?? '已完成操作')
+      setMessage(data?.message ?? '操作完成。')
       await Promise.all([loadCharacterData(), refreshProfile()])
     }
 
     setBusyKey(null)
+  }
+
+  const renderSquareImage = (imageUrl: string | null | undefined, alt: string, fallbackText: string, className = 'h-16 w-16') => {
+    if (imageUrl) {
+      return (
+        <div className={`${className} overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60`}>
+          <img src={imageUrl} alt={alt} className="h-full w-full object-cover" />
+        </div>
+      )
+    }
+
+    return (
+      <div className={`${className} flex items-center justify-center whitespace-pre-line rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 px-2 text-center text-[11px] leading-tight text-slate-500`}>
+        {fallbackText}
+      </div>
+    )
   }
 
   const renderBonusSection = (title: string, items: Array<{ source_name: string; effect_type: string; value: number }>) => (
@@ -162,13 +182,37 @@ export default function CharacterPage() {
   const bonus = profile.bonuses as ComputedCharacterBonus
   const primaryProfession = profile.current_profession
   const progressPercent = getProgressPercent(profile)
+  const currentGender = user?.gender ?? null
+
+  const updateGender = async (gender: CharacterGender) => {
+    if (!user || savingGender || user.gender === gender) return
+
+    setSavingGender(true)
+    setMessage(null)
+    setError(null)
+
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({ gender })
+      .eq('id', user.id)
+
+    if (updateError) {
+      setError(updateError.message)
+      setSavingGender(false)
+      return
+    }
+
+    await refreshProfile()
+    setMessage(gender === 'male' ? '已切換為男生形象。' : '已切換為女生形象。')
+    setSavingGender(false)
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">角色養成</h1>
         <p className="mt-1 text-sm text-slate-400">
-          等級、職業、裝備與被動能力都會在這裡整合顯示。
+          查看目前等級、主職業、裝備與所有加成效果。
         </p>
       </div>
 
@@ -186,21 +230,51 @@ export default function CharacterPage() {
 
       <section className="rounded-3xl border border-indigo-500/20 bg-gradient-to-br from-slate-800 to-slate-900 p-5 shadow-xl">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm text-indigo-300">目前等級</p>
-            <div className="mt-1 flex items-end gap-3">
-              <span className="text-5xl font-black text-white">{profile.progress.level}</span>
-              <span className="pb-1 text-slate-400">累積獲點 {profile.progress.earned_points_total}</span>
+          <div className="flex items-center gap-4">
+            {renderSquareImage(resolveProfessionImageUrl(primaryProfession, currentGender), primaryProfession?.name ?? '主職業', '未設定\n職業圖', 'h-20 w-20')}
+            <div>
+              <p className="text-sm text-indigo-300">角色等級</p>
+              <div className="mt-1 flex items-end gap-3">
+                <span className="text-5xl font-black text-white">{profile.progress.level}</span>
+                <span className="pb-1 text-slate-400">累積點數 {profile.progress.earned_points_total}</span>
+              </div>
+              <p className="mt-2 text-sm text-slate-400">
+                主職業：{primaryProfession?.name ?? '尚未選擇主職業'}
+              </p>
             </div>
-            <p className="mt-2 text-sm text-slate-400">
-              主職業：{primaryProfession?.name ?? '尚未選職'}
-            </p>
           </div>
 
           <div className="rounded-2xl bg-slate-900/70 px-4 py-3 text-sm text-slate-300">
             <p>已解鎖職業 {profile.unlocked_professions.length} 個</p>
-            <p className="mt-1">可用選職次數 {profile.progress.available_unlocks}</p>
+            <p className="mt-1">可選新職業次數 {profile.progress.available_unlocks}</p>
           </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-slate-900/60 px-4 py-3">
+          <span className="text-sm text-slate-300">角色形象</span>
+          <div className="inline-flex rounded-xl border border-slate-700 bg-slate-950/80 p-1">
+            {[
+              { value: 'male' as const, label: '男生' },
+              { value: 'female' as const, label: '女生' },
+            ].map(option => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => void updateGender(option.value)}
+                disabled={savingGender}
+                className={`rounded-lg px-3 py-1.5 text-sm transition ${
+                  currentGender === option.value
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-300 hover:bg-slate-800'
+                } disabled:opacity-50`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-slate-500">
+            會影響職業圖片顯示；若沒有男女分圖，會自動改用預設圖。
+          </span>
         </div>
 
         <div className="mt-4">
@@ -218,19 +292,22 @@ export default function CharacterPage() {
         <section className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-5">
           <div className="flex items-center gap-2">
             <Wand2 size={18} className="text-amber-300" />
-            <h2 className="text-lg font-semibold text-amber-100">可選擇的新職業</h2>
+            <h2 className="text-lg font-semibold text-amber-100">可解鎖的新職業</h2>
           </div>
           <p className="mt-1 text-sm text-amber-100/80">
-            這次開放的是 {getTierLabel(profile.progress.next_choice_tier)}。
+            你已達到 {getTierLabel(profile.progress.next_choice_tier)}，可以選擇新的職業。
           </p>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {profile.available_profession_choices.map(choice => (
               <div key={choice.id} className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-semibold text-white">{choice.name}</h3>
-                    <p className="mt-1 text-sm text-slate-400">{choice.description}</p>
+                  <div className="flex items-start gap-3">
+                    {renderSquareImage(resolveProfessionImageUrl(choice, currentGender), choice.name, '未設定\n職業圖')}
+                    <div>
+                      <h3 className="font-semibold text-white">{choice.name}</h3>
+                      <p className="mt-1 text-sm text-slate-400">{choice.description}</p>
+                    </div>
                   </div>
                   <span className="rounded-full px-2.5 py-1 text-xs font-medium text-white" style={{ backgroundColor: choice.theme_color }}>
                     {getTierLabel(choice.unlock_tier)}
@@ -271,14 +348,17 @@ export default function CharacterPage() {
 
           <div className="mt-4 space-y-3">
             {profile.unlocked_professions.length === 0 ? (
-              <p className="text-sm text-slate-500">10 級後可以開始選職。</p>
+              <p className="text-sm text-slate-500">10 級後會開始解鎖職業。</p>
             ) : (
               profile.unlocked_professions.map((profession: PlayerProfession) => (
                 <div key={profession.id} className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold text-white">{profession.profession?.name}</h3>
-                      <p className="mt-1 text-sm text-slate-400">{profession.profession?.description}</p>
+                    <div className="flex items-start gap-3">
+                      {renderSquareImage(resolveProfessionImageUrl(profession.profession, currentGender), profession.profession?.name ?? '職業', '未設定\n職業圖')}
+                      <div>
+                        <h3 className="font-semibold text-white">{profession.profession?.name}</h3>
+                        <p className="mt-1 text-sm text-slate-400">{profession.profession?.description}</p>
+                      </div>
                     </div>
                     {profession.equipped_as_primary ? (
                       <span className="rounded-full bg-indigo-500/20 px-2.5 py-1 text-xs font-medium text-indigo-300">主職業</span>
@@ -289,14 +369,14 @@ export default function CharacterPage() {
                         disabled={busyKey === `switch-${profession.id}`}
                         className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-600 disabled:opacity-50"
                       >
-                        切換主職
+                        設為主職業
                       </button>
                     )}
                   </div>
 
                   {!profession.equipped_as_primary && Object.keys(profession.frozen_effect_snapshot ?? {}).length > 0 ? (
                     <div className="mt-3 rounded-xl bg-slate-800 px-3 py-3 text-sm">
-                      <p className="mb-2 text-xs uppercase tracking-wide text-slate-400">已保留的舊職業效果</p>
+                      <p className="mb-2 text-xs uppercase tracking-wide text-slate-400">保留中的舊職業效果</p>
                       <div className="space-y-2">
                         {Object.entries(profession.frozen_effect_snapshot).map(([effectType, value]) => (
                           <div key={effectType} className="flex items-center justify-between">
@@ -317,7 +397,7 @@ export default function CharacterPage() {
 
         <div className="space-y-4">
           {renderBonusSection('主職業效果', bonus.breakdown.primary)}
-          {renderBonusSection('已保留舊職業效果', bonus.breakdown.archived)}
+          {renderBonusSection('保留職業效果', bonus.breakdown.archived)}
           {renderBonusSection('裝備效果', bonus.breakdown.equipment)}
         </div>
       </section>
@@ -325,7 +405,7 @@ export default function CharacterPage() {
       <section className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
         <div className="flex items-center gap-2">
           <Shield size={18} className="text-violet-300" />
-          <h2 className="text-lg font-semibold text-white">四格裝備</h2>
+          <h2 className="text-lg font-semibold text-white">目前裝備</h2>
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -338,7 +418,10 @@ export default function CharacterPage() {
                 <p className="text-sm font-medium text-slate-300">{SLOT_LABELS[slot]}</p>
                 {item ? (
                   <>
-                    <p className="mt-2 font-semibold text-white">{item.equipment.name}</p>
+                    <div className="mt-3">
+                      {renderSquareImage(item.equipment.image_url, item.equipment.name, '未設定\n裝備圖', 'h-20 w-20')}
+                    </div>
+                    <p className="mt-3 font-semibold text-white">{item.equipment.name}</p>
                     <p className="text-xs text-slate-500">{formatEquipmentRarity(item.equipment.rarity)}</p>
                     <button
                       type="button"
@@ -350,7 +433,7 @@ export default function CharacterPage() {
                     </button>
                   </>
                 ) : (
-                  <p className="mt-2 text-sm text-slate-500">尚未穿戴</p>
+                  <p className="mt-2 text-sm text-slate-500">尚未裝備</p>
                 )}
               </div>
             )
@@ -360,19 +443,22 @@ export default function CharacterPage() {
         <div className="mt-6 space-y-4">
           {groupedInventory.map(group => (
             <div key={group.slot}>
-              <h3 className="mb-2 text-sm font-semibold text-slate-300">{SLOT_LABELS[group.slot]}背包</h3>
+              <h3 className="mb-2 text-sm font-semibold text-slate-300">{SLOT_LABELS[group.slot]}持有裝備</h3>
               {group.items.length === 0 ? (
-                <p className="text-sm text-slate-500">這個欄位還沒有裝備。</p>
+                <p className="text-sm text-slate-500">目前沒有這個欄位的裝備。</p>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">
                   {group.items.map(item => (
                     <div key={item.id} className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-white">{item.equipment.name}</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {formatEquipmentRarity(item.equipment.rarity)} · 持有 {item.quantity} 件
-                          </p>
+                        <div className="flex items-start gap-3">
+                          {renderSquareImage(item.equipment.image_url, item.equipment.name, '未設定\n裝備圖')}
+                          <div>
+                            <p className="font-semibold text-white">{item.equipment.name}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {formatEquipmentRarity(item.equipment.rarity)} · 持有 {item.quantity} 件
+                            </p>
+                          </div>
                         </div>
                         <span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">
                           {SLOT_LABELS[item.equipment.slot_type]}
@@ -396,7 +482,7 @@ export default function CharacterPage() {
                         disabled={busyKey === `equip-${item.id}`}
                         className="mt-4 w-full rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
                       >
-                        穿戴
+                        裝備
                       </button>
                     </div>
                   ))}
@@ -412,21 +498,24 @@ export default function CharacterPage() {
           <ShoppingBag size={18} className="text-amber-300" />
           <h2 className="text-lg font-semibold text-white">角色商店</h2>
         </div>
-        <p className="mt-1 text-sm text-slate-400">可用星星直接購買裝備，折扣會自動套用。</p>
+        <p className="mt-1 text-sm text-slate-400">可以用星星購買裝備，買到後會進入你的裝備庫。</p>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {shopItems.length === 0 ? (
-            <p className="text-sm text-slate-500">目前沒有上架中的裝備。</p>
+            <p className="text-sm text-slate-500">目前沒有可購買的裝備。</p>
           ) : (
             shopItems.map(item => (
               <div key={item.id} className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-white">{item.name}</p>
-                    <p className="mt-1 text-sm text-slate-400">{item.description || '尚無描述'}</p>
+                  <div className="flex items-start gap-3">
+                    {renderSquareImage(item.image_url, item.name, '未設定\n裝備圖')}
+                    <div>
+                      <p className="font-semibold text-white">{item.name}</p>
+                      <p className="mt-1 text-sm text-slate-400">{item.description || '尚未填寫裝備說明。'}</p>
+                    </div>
                   </div>
                   <span className="rounded-full bg-amber-500/20 px-2 py-1 text-xs font-medium text-amber-300">
-                    {item.shop_cost} 星星
+                    {item.shop_cost} 星
                   </span>
                 </div>
 
@@ -458,14 +547,14 @@ export default function CharacterPage() {
       <section className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
         <div className="flex items-center gap-2">
           <Star size={18} className="text-emerald-300" />
-          <h2 className="text-lg font-semibold text-white">最終能力摘要</h2>
+          <h2 className="text-lg font-semibold text-white">總加成一覽</h2>
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {Object.entries(bonus.summary).map(([effectType, value]) => (
             <div key={effectType} className="rounded-xl bg-slate-900/60 px-4 py-3">
-              <p className="text-sm text-slate-400">{EFFECT_LABELS[effectType as keyof typeof EFFECT_LABELS] ?? effectType}</p>
+              <p className="text-sm text-slate-400">{EFFECT_LABELS[effectType as ProfessionEffectType] ?? effectType}</p>
               <p className="mt-1 text-lg font-semibold text-white">
-                {formatEffectValue(effectType as keyof typeof EFFECT_LABELS, Number(value))}
+                {formatEffectValue(effectType as ProfessionEffectType, Number(value))}
               </p>
             </div>
           ))}

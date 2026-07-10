@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BarChart3, Edit3, Library, ListChecks, Package, Server, Settings, Sparkles, Trophy, Users, Wand2 } from 'lucide-react'
+import { BarChart3, BookOpen, Edit3, Library, ListChecks, Package, Server, Settings, Sparkles, Trophy, Users, Wand2 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
@@ -47,19 +47,20 @@ export default function TeacherPage() {
 
   const quickLinks = useMemo(() => {
     const links = [
-      { icon: Library, label: '卡牌管理', desc: '建立卡片、維護分集冊與 AI 卡圖', href: '/teacher/cards' },
-      { icon: Package, label: '卡包管理', desc: '設定卡包內容、權重與公開機率', href: '/teacher/packs' },
-      { icon: ListChecks, label: '任務管理', desc: '建立任務、列印條碼、查看發點紀錄', href: '/teacher/tasks' },
-      { icon: Trophy, label: '成就管理', desc: '建立成就條件與獎勵內容', href: '/teacher/achievements' },
-      { icon: BarChart3, label: '統計分析', desc: '查看班級表現、任務趨勢與個人報表', href: '/teacher/analytics' },
-      { icon: Users, label: '學生與條碼', desc: '管理班級、學生名單與身分條碼', href: '/teacher/students' },
-      { icon: Wand2, label: '職業管理', desc: '設定職業模板、效果與解鎖梯次', href: '/teacher/professions' },
-      { icon: Sparkles, label: '裝備管理', desc: '建立裝備、設定效果並發放給學生', href: '/teacher/equipment' },
+      { icon: Library, label: '卡牌管理', desc: '建立卡牌、上傳圖片、AI 生圖與整理卡片資料。', href: '/teacher/cards' },
+      { icon: Package, label: '卡包管理', desc: '設定卡包內容、抽卡張數與卡包圖片。', href: '/teacher/packs' },
+      { icon: ListChecks, label: '任務管理', desc: '建立任務、設定完成方式與每週期限制。', href: '/teacher/tasks' },
+      { icon: Trophy, label: '成就管理', desc: '設定成就條件、獎勵與顯示方式。', href: '/teacher/achievements' },
+      { icon: BarChart3, label: '分析資料', desc: '查看學生、任務與卡牌的整體統計。', href: '/teacher/analytics' },
+      { icon: Users, label: '學生管理', desc: '管理學生資料、登入資訊與掃碼資訊。', href: '/teacher/students' },
+      { icon: Wand2, label: '職業管理', desc: '設定職業效果、職業圖片與男女版本職業圖。', href: '/teacher/professions' },
+      { icon: Sparkles, label: '裝備管理', desc: '建立裝備、設定效果與裝備圖片。', href: '/teacher/equipment' },
+      { icon: BookOpen, label: '教師後台說明', desc: '查看各頁功能說明、AI 生圖教學與 Hugging Face 操作指南。', href: '/teacher/help' },
     ]
 
     if (user?.role === 'admin') {
-      links.push({ icon: Server, label: '共享生圖主機', desc: '設定全校共用的 ComfyUI Gateway 與 workflow', href: '/teacher/ai-remote' })
-      links.push({ icon: Settings, label: '管理者設定', desc: '管理高權限帳號與系統設定', href: '/admin' })
+      links.push({ icon: Server, label: '共享生圖設定', desc: '維護共享 ComfyUI Gateway、workflow 與遠端生圖設定。', href: '/teacher/ai-remote' })
+      links.push({ icon: Settings, label: '系統管理', desc: '管理系統角色、教師與全站設定。', href: '/admin' })
     }
 
     return links
@@ -70,12 +71,12 @@ export default function TeacherPage() {
     setMessage(null)
     setError(null)
 
-    const { data, error } = await supabase.rpc('bootstrap_admin_role')
+    const { data, error: bootstrapError } = await supabase.rpc('bootstrap_admin_role')
 
-    if (error) {
-      setError(error.message)
+    if (bootstrapError) {
+      setError(bootstrapError.message)
     } else {
-      setMessage(data?.[0]?.message ?? '已將你的帳號升級為第一位管理者。')
+      setMessage(data?.[0]?.message ?? '已完成初始化，正在前往管理者頁面。')
       await refreshProfile()
       navigate('/admin')
     }
@@ -87,17 +88,29 @@ export default function TeacherPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">教師後台</h1>
-        <p className="mt-1 text-sm text-slate-400">從這裡管理卡牌、卡包、任務、成就、學生、職業與裝備系統。</p>
+        <p className="mt-1 text-sm text-slate-400">從這裡進入卡牌、任務、職業、裝備、學生與 AI 生圖相關設定。</p>
       </div>
 
       {message ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{message}</div> : null}
       {error ? <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
 
+      <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/10 p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-medium text-indigo-200">剛開始使用教師後台？</p>
+            <p className="mt-1 text-sm text-indigo-100/80">建議先看一次教師後台說明頁，裡面有 Hugging Face key 申請、作者 / 模型填法、以及各頁用途整理。</p>
+          </div>
+          <Link to="/teacher/help" className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white no-underline hover:bg-indigo-500">
+            前往教師後台說明
+          </Link>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <div className="rounded-xl bg-slate-800 p-4 text-center">
           <Library size={24} className="mx-auto mb-1 text-indigo-400" />
           <p className="text-2xl font-bold text-white">{stats.cards}</p>
-          <p className="text-xs text-slate-400">卡片</p>
+          <p className="text-xs text-slate-400">卡牌</p>
         </div>
         <div className="rounded-xl bg-slate-800 p-4 text-center">
           <Package size={24} className="mx-auto mb-1 text-violet-400" />
@@ -117,25 +130,25 @@ export default function TeacherPage() {
         <div className="rounded-xl bg-slate-800 p-4 text-center">
           <Users size={24} className="mx-auto mb-1 text-blue-400" />
           <p className="text-2xl font-bold text-white">{stats.users}</p>
-          <p className="text-xs text-slate-400">帳號</p>
+          <p className="text-xs text-slate-400">使用者</p>
         </div>
         <div className="rounded-xl bg-slate-800 p-4 text-center">
           <Wand2 size={24} className="mx-auto mb-1 text-fuchsia-400" />
           <p className="text-2xl font-bold text-white">{stats.professions}</p>
-          <p className="text-xs text-slate-400">職業模板</p>
+          <p className="text-xs text-slate-400">職業</p>
         </div>
         <div className="rounded-xl bg-slate-800 p-4 text-center">
           <Sparkles size={24} className="mx-auto mb-1 text-pink-400" />
           <p className="text-2xl font-bold text-white">{stats.equipments}</p>
-          <p className="text-xs text-slate-400">裝備模板</p>
+          <p className="text-xs text-slate-400">裝備</p>
         </div>
       </div>
 
       {user?.role === 'teacher' && adminCount === 0 ? (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
-          <p className="font-medium text-amber-200">系統目前還沒有管理者</p>
+          <p className="font-medium text-amber-200">目前還沒有管理者</p>
           <p className="mt-1 text-sm text-amber-100/80">
-            你可以先把自己升級成第一位管理者，之後再由管理者負責高權限帳號管理。
+            你可以先初始化第一位管理者，之後就能進入系統管理頁面處理權限與共用設定。
           </p>
           <button
             type="button"
@@ -143,7 +156,7 @@ export default function TeacherPage() {
             disabled={bootstrapping}
             className="mt-3 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-amber-400 disabled:opacity-50"
           >
-            {bootstrapping ? '處理中...' : '成為第一位管理者'}
+            {bootstrapping ? '初始化中...' : '成為第一位管理者'}
           </button>
         </div>
       ) : null}
@@ -151,7 +164,7 @@ export default function TeacherPage() {
       <div className="grid gap-3">
         <h2 className="flex items-center gap-2 font-semibold text-white">
           <Sparkles size={18} className="text-indigo-400" />
-          常用功能
+          常用入口
         </h2>
 
         {quickLinks.map(item => (
