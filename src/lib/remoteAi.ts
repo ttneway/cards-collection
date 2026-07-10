@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { invokeAiImageFunction } from './aiImage'
-import type { RemoteAiSettings } from '../types'
+import type { RemoteAiSettings, RemoteAiWorkflow } from '../types'
 
 export type RemoteAiGatewayHealth = {
   configured: boolean
@@ -29,6 +29,59 @@ export type RemoteAiReleaseResult = {
   released: boolean
   reason?: string
   released_at?: string | null
+}
+
+export async function loadRemoteAiWorkflows() {
+  const { data, error } = await supabase.rpc('get_remote_ai_workflows')
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return ((data ?? []) as RemoteAiWorkflow[]).sort((left, right) => {
+    if (left.sort_order !== right.sort_order) {
+      return left.sort_order - right.sort_order
+    }
+
+    return left.name.localeCompare(right.name, 'zh-Hant')
+  })
+}
+
+export async function saveRemoteAiWorkflow(input: {
+  id?: string | null
+  name: string
+  targetType: 'all' | 'card' | 'equipment' | 'profession'
+  workflowApiJson: string
+  isActive: boolean
+  sortOrder: number
+}) {
+  const { data, error } = await supabase.rpc('upsert_remote_ai_workflow', {
+    p_id: input.id ?? null,
+    p_name: input.name,
+    p_target_type: input.targetType,
+    p_workflow_api_json: input.workflowApiJson,
+    p_is_active: input.isActive,
+    p_sort_order: input.sortOrder,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  const workflow = Array.isArray(data) ? (data[0] as RemoteAiWorkflow | undefined) : (data as RemoteAiWorkflow | null)
+  return workflow ?? null
+}
+
+export async function deleteRemoteAiWorkflow(id: string) {
+  const { data, error } = await supabase.rpc('delete_remote_ai_workflow', {
+    p_id: id,
+  })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return Boolean(data)
 }
 
 export async function loadRemoteAiSettings() {
@@ -90,6 +143,8 @@ export async function generateRemoteImagePreview(input: {
   targetId: string
   imagePrompt: string
   imageStyle: string
+  workflowId?: string | null
+  targetImageField?: string | null
   finalPromptOverride?: string
   negativePromptOverride?: string
   seedOverride?: number | null
@@ -100,6 +155,8 @@ export async function generateRemoteImagePreview(input: {
     targetId: input.targetId,
     imagePrompt: input.imagePrompt,
     imageStyle: input.imageStyle,
+    workflowId: input.workflowId,
+    targetImageField: input.targetImageField,
     finalPromptOverride: input.finalPromptOverride,
     negativePromptOverride: input.negativePromptOverride,
     seedOverride: input.seedOverride,
@@ -122,6 +179,7 @@ export async function generateRemoteCardPreview(input: {
   cardId: string
   imagePrompt: string
   imageStyle: string
+  workflowId?: string | null
   finalPromptOverride?: string
   negativePromptOverride?: string
   seedOverride?: number | null
@@ -131,6 +189,7 @@ export async function generateRemoteCardPreview(input: {
     targetId: input.cardId,
     imagePrompt: input.imagePrompt,
     imageStyle: input.imageStyle,
+    workflowId: input.workflowId,
     finalPromptOverride: input.finalPromptOverride,
     negativePromptOverride: input.negativePromptOverride,
     seedOverride: input.seedOverride,

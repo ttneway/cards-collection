@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, RefreshCw, Save, Server, Shield, Sparkles, Wifi } from 'lucide-react'
-import { checkRemoteAiGateway, loadRemoteAiSettings, saveRemoteAiSettings, type RemoteAiGatewayHealth } from '../lib/remoteAi'
+import { CheckCircle2, Plus, RefreshCw, Save, Server, Shield, Sparkles, Trash2, Wifi } from 'lucide-react'
+import { checkRemoteAiGateway, deleteRemoteAiWorkflow, loadRemoteAiSettings, loadRemoteAiWorkflows, saveRemoteAiSettings, saveRemoteAiWorkflow, type RemoteAiGatewayHealth } from '../lib/remoteAi'
 import { useAuthStore } from '../stores/authStore'
-import type { RemoteAiSettings } from '../types'
+import type { RemoteAiSettings, RemoteAiWorkflow } from '../types'
 
 const WORKFLOW_PLACEHOLDERS = [
   '{{full_prompt}}',
@@ -49,6 +49,37 @@ type FormState = {
   isEnabled: boolean
 }
 
+type WorkflowFormState = {
+  id: string | null
+  name: string
+  targetType: 'all' | 'card' | 'equipment' | 'profession'
+  workflowApiJson: string
+  sortOrder: string
+  isActive: boolean
+}
+
+const emptyWorkflowForm: WorkflowFormState = {
+  id: null,
+  name: '',
+  targetType: 'all',
+  workflowApiJson: DEFAULT_WORKFLOW_TEMPLATE,
+  sortOrder: '0',
+  isActive: true,
+}
+
+function mapWorkflowToForm(workflow: RemoteAiWorkflow | null): WorkflowFormState {
+  if (!workflow) return emptyWorkflowForm
+
+  return {
+    id: workflow.id,
+    name: workflow.name,
+    targetType: workflow.target_type,
+    workflowApiJson: workflow.workflow_api_json,
+    sortOrder: String(workflow.sort_order ?? 0),
+    isActive: workflow.is_active,
+  }
+}
+
 function mapSettingsToForm(settings: RemoteAiSettings | null): FormState {
   return {
     baseUrl: settings?.base_url ?? '',
@@ -65,9 +96,13 @@ export default function TeacherRemoteAiPage() {
   const { user } = useAuthStore()
   const [settings, setSettings] = useState<RemoteAiSettings | null>(null)
   const [form, setForm] = useState<FormState>(() => mapSettingsToForm(null))
+  const [workflows, setWorkflows] = useState<RemoteAiWorkflow[]>([])
+  const [workflowForm, setWorkflowForm] = useState<WorkflowFormState>(emptyWorkflowForm)
   const [health, setHealth] = useState<RemoteAiGatewayHealth | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingWorkflow, setSavingWorkflow] = useState(false)
+  const [deletingWorkflowId, setDeletingWorkflowId] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -84,6 +119,7 @@ export default function TeacherRemoteAiPage() {
 
   useEffect(() => {
     void refreshSettings()
+    void refreshWorkflows()
   }, [])
 
   async function refreshSettings() {
@@ -98,6 +134,15 @@ export default function TeacherRemoteAiPage() {
       setError(loadError instanceof Error ? loadError.message : '無法載入共享生圖設定。')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function refreshWorkflows() {
+    try {
+      const nextWorkflows = await loadRemoteAiWorkflows()
+      setWorkflows(nextWorkflows)
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : '無法載入共享工作流清單。')
     }
   }
 
@@ -187,6 +232,58 @@ export default function TeacherRemoteAiPage() {
       setError(healthError instanceof Error ? healthError.message : '無法測試共享生圖主機。')
     } finally {
       setTesting(false)
+    }
+  }
+
+  async function handleWorkflowSave() {
+    if (!canEdit) return
+
+    setSavingWorkflow(true)
+    setMessage(null)
+    setError(null)
+
+    try {
+      JSON.parse(workflowForm.workflowApiJson)
+
+      const nextWorkflow = await saveRemoteAiWorkflow({
+        id: workflowForm.id,
+        name: workflowForm.name.trim(),
+        targetType: workflowForm.targetType,
+        workflowApiJson: workflowForm.workflowApiJson,
+        isActive: workflowForm.isActive,
+        sortOrder: Number(workflowForm.sortOrder || '0'),
+      })
+
+      await refreshWorkflows()
+      setWorkflowForm(mapWorkflowToForm(nextWorkflow))
+      setMessage('共享工作流已儲存。')
+    } catch (saveError) {
+      if (saveError instanceof SyntaxError) {
+        setError('工作流 JSON 格式不正確，請先確認內容是完整 JSON。')
+      } else {
+        setError(saveError instanceof Error ? saveError.message : '儲存共享工作流失敗。')
+      }
+    } finally {
+      setSavingWorkflow(false)
+    }
+  }
+
+  async function handleWorkflowDelete(id: string) {
+    if (!canEdit) return
+
+    setDeletingWorkflowId(id)
+    setMessage(null)
+    setError(null)
+
+    try {
+      await deleteRemoteAiWorkflow(id)
+      await refreshWorkflows()
+      setWorkflowForm(emptyWorkflowForm)
+      setMessage('共享工作流已刪除。')
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '刪除共享工作流失敗。')
+    } finally {
+      setDeletingWorkflowId(null)
     }
   }
 
@@ -393,6 +490,140 @@ export default function TeacherRemoteAiPage() {
           </button>
         ) : null}
       </form>
+
+      <section className="space-y-5 rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 font-semibold text-white">
+              <Sparkles size={18} className="text-indigo-300" />
+              共享工作流清單
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">先把不同用途的 ComfyUI workflow 存起來，教師生圖時就可以直接切換。</p>
+          </div>
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => setWorkflowForm(emptyWorkflowForm)}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-600"
+            >
+              <Plus size={16} />
+              新工作流
+            </button>
+          ) : null}
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="space-y-3">
+            {workflows.length === 0 ? (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 text-sm text-slate-400">目前還沒有儲存任何共享工作流。</div>
+            ) : (
+              workflows.map(workflow => (
+                <div key={workflow.id} className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-white">{workflow.name}</p>
+                      <p className="mt-1 text-xs text-slate-400">適用：{workflow.target_type === 'all' ? '全部' : workflow.target_type}</p>
+                      <p className="mt-1 text-xs text-slate-500">排序：{workflow.sort_order} {workflow.is_active ? '· 啟用' : '· 停用'}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setWorkflowForm(mapWorkflowToForm(workflow))}
+                        className="rounded-lg bg-indigo-600 px-3 py-2 text-xs text-white hover:bg-indigo-500"
+                      >
+                        編輯
+                      </button>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleWorkflowDelete(workflow.id)}
+                          disabled={deletingWorkflowId === workflow.id}
+                          className="rounded-lg bg-rose-600/20 px-3 py-2 text-xs text-rose-200 hover:bg-rose-600/30 disabled:opacity-50"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="space-y-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+            <label className="space-y-2">
+              <span className="text-sm text-slate-300">工作流名稱</span>
+              <input
+                value={workflowForm.name}
+                onChange={event => setWorkflowForm(previous => ({ ...previous, name: event.target.value }))}
+                disabled={!canEdit}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white disabled:opacity-60"
+              />
+            </label>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className="space-y-2 md:col-span-2">
+                <span className="text-sm text-slate-300">適用頁面</span>
+                <select
+                  value={workflowForm.targetType}
+                  onChange={event => setWorkflowForm(previous => ({ ...previous, targetType: event.target.value as WorkflowFormState['targetType'] }))}
+                  disabled={!canEdit}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white disabled:opacity-60"
+                >
+                  <option value="all">全部</option>
+                  <option value="card">卡牌</option>
+                  <option value="equipment">裝備</option>
+                  <option value="profession">職業</option>
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm text-slate-300">排序</span>
+                <input
+                  type="number"
+                  value={workflowForm.sortOrder}
+                  onChange={event => setWorkflowForm(previous => ({ ...previous, sortOrder: event.target.value }))}
+                  disabled={!canEdit}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white disabled:opacity-60"
+                />
+              </label>
+            </div>
+
+            <label className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={workflowForm.isActive}
+                onChange={event => setWorkflowForm(previous => ({ ...previous, isActive: event.target.checked }))}
+                disabled={!canEdit}
+                className="accent-indigo-500"
+              />
+              啟用這組工作流
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm text-slate-300">Workflow JSON</span>
+              <textarea
+                value={workflowForm.workflowApiJson}
+                onChange={event => setWorkflowForm(previous => ({ ...previous, workflowApiJson: event.target.value }))}
+                rows={16}
+                disabled={!canEdit}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white disabled:opacity-60"
+              />
+            </label>
+
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={() => void handleWorkflowSave()}
+                disabled={savingWorkflow}
+                className="inline-flex items-center gap-2 rounded-xl bg-fuchsia-600 px-5 py-3 font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50"
+              >
+                {savingWorkflow ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+                {savingWorkflow ? '儲存中...' : workflowForm.id ? '更新工作流' : '新增工作流'}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
         <div className="flex items-center gap-2 font-semibold text-white">

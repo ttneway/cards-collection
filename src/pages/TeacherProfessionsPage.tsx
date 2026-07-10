@@ -13,11 +13,11 @@ import {
   type PromptPreviewResult,
 } from '../lib/aiImage'
 import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
-import { checkRemoteAiGateway, generateRemoteImagePreview, loadRemoteAiSettings, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
+import { checkRemoteAiGateway, generateRemoteImagePreview, loadRemoteAiSettings, loadRemoteAiWorkflows, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
 import { supabase } from '../lib/supabase'
 import { EFFECT_LABELS, STYLE_OPTIONS, formatEffectValue, getBalanceWarnings, getTierLabel } from '../lib/character'
 import { useAuthStore } from '../stores/authStore'
-import type { BonusEntry, ProfessionEffect, ProfessionEffectType, ProfessionTemplate, RemoteAiSettings } from '../types'
+import type { BonusEntry, ProfessionEffect, ProfessionEffectType, ProfessionTemplate, RemoteAiSettings, RemoteAiWorkflow } from '../types'
 
 type ProfessionWithEffects = ProfessionTemplate & { profession_effects?: ProfessionEffect[] }
 
@@ -72,6 +72,8 @@ type PromptEditorState = {
   supportsNegativePrompt: boolean
   supportsSeed: boolean
 }
+
+type ProfessionImageTarget = 'icon_url' | 'icon_url_male' | 'icon_url_female'
 
 const defaultEffect = (): EffectForm => ({
   effect_type: 'task_points_percent',
@@ -130,14 +132,19 @@ export default function TeacherProfessionsPage() {
   const [loadingRemoteAiSettings, setLoadingRemoteAiSettings] = useState(false)
   const [remoteAiHealth, setRemoteAiHealth] = useState<RemoteAiGatewayHealth | null>(null)
   const [testingRemoteAi, setTestingRemoteAi] = useState(false)
+  const [remoteWorkflows, setRemoteWorkflows] = useState<RemoteAiWorkflow[]>([])
+  const [loadingRemoteWorkflows, setLoadingRemoteWorkflows] = useState(false)
+  const [selectedRemoteWorkflowId, setSelectedRemoteWorkflowId] = useState<string>('')
   const [remotePreviewUrl, setRemotePreviewUrl] = useState<string | null>(null)
   const [remotePreviewBase64, setRemotePreviewBase64] = useState<string | null>(null)
   const [remotePreviewMimeType, setRemotePreviewMimeType] = useState<string | null>(null)
   const [remotePreviewProfessionId, setRemotePreviewProfessionId] = useState<string | null>(null)
   const [remotePreviewPrompt, setRemotePreviewPrompt] = useState<string>('')
   const [remotePreviewStyle, setRemotePreviewStyle] = useState<string>(STYLE_OPTIONS[0])
+  const [remotePreviewImageField, setRemotePreviewImageField] = useState<ProfessionImageTarget>('icon_url')
   const [applyingRemotePreview, setApplyingRemotePreview] = useState(false)
   const [promptEditor, setPromptEditor] = useState<PromptEditorState>(emptyPromptEditorState)
+  const [professionImageTarget, setProfessionImageTarget] = useState<ProfessionImageTarget>('icon_url')
   const [previewLevel, setPreviewLevel] = useState<number>(10)
   const [previewBonuses, setPreviewBonuses] = useState<PreviewBonusesPayload | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -151,8 +158,15 @@ export default function TeacherProfessionsPage() {
   const canUseRemoteAi =
     Boolean(remoteAiSettings?.is_enabled) &&
     Boolean(remoteAiSettings?.base_url.trim()) &&
-    Boolean(remoteAiSettings?.workflow_api_json.trim()) &&
+    Boolean((remoteAiSettings?.workflow_api_json ?? '').trim() || remoteWorkflows.some(workflow => workflow.is_active && (workflow.target_type === 'all' || workflow.target_type === 'profession'))) &&
     Boolean(remoteAiSettings?.shared_secret_configured)
+  const availableRemoteWorkflows = useMemo(
+    () =>
+      remoteWorkflows.filter(
+        workflow => workflow.is_active && (workflow.target_type === 'all' || workflow.target_type === 'profession')
+      ),
+    [remoteWorkflows]
+  )
   const huggingFaceModel = buildHuggingFaceModelPath(huggingFaceAuthor, huggingFaceModelName)
   const aiSourceRef = useRef<(typeof AI_SOURCE_OPTIONS)[number]['value']>(aiSource)
 
@@ -160,6 +174,7 @@ export default function TeacherProfessionsPage() {
     void loadProfessions()
     void loadAiImageStatus()
     void refreshRemoteAiSettings()
+    void refreshRemoteWorkflows()
   }, [])
 
   useEffect(() => {
@@ -236,6 +251,7 @@ export default function TeacherProfessionsPage() {
     setRemotePreviewProfessionId(null)
     setRemotePreviewPrompt('')
     setRemotePreviewStyle(STYLE_OPTIONS[0])
+    setRemotePreviewImageField('icon_url')
 
     if (shouldRelease) {
       void releaseRemoteModelsIfNeeded()
@@ -355,6 +371,7 @@ export default function TeacherProfessionsPage() {
   const resetForm = () => {
     clearRemotePreview(true)
     setPromptEditor(emptyPromptEditorState)
+    setProfessionImageTarget('icon_url')
     setEditingId(null)
     setForm(emptyForm)
     setEffects([defaultEffect()])
@@ -473,6 +490,26 @@ export default function TeacherProfessionsPage() {
     }
   }
 
+  const currentProfessionImageUrl =
+    professionImageTarget === 'icon_url_male'
+      ? form.icon_url_male || form.icon_url || form.icon_url_female
+      : professionImageTarget === 'icon_url_female'
+        ? form.icon_url_female || form.icon_url || form.icon_url_male
+        : form.icon_url || form.icon_url_male || form.icon_url_female
+
+  const refreshRemoteWorkflows = async () => {
+    setLoadingRemoteWorkflows(true)
+
+    try {
+      const nextWorkflows = await loadRemoteAiWorkflows()
+      setRemoteWorkflows(nextWorkflows)
+    } catch (workflowError) {
+      setError(workflowError instanceof Error ? workflowError.message : '讀取共享工作流清單失敗。')
+    } finally {
+      setLoadingRemoteWorkflows(false)
+    }
+  }
+
   const handleProfessionImageUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
     field: 'icon_url' | 'icon_url_male' | 'icon_url_female'
@@ -542,6 +579,8 @@ export default function TeacherProfessionsPage() {
         imagePrompt: form.image_prompt.trim(),
         imageStyle: form.image_style,
         generationSource: aiSource,
+        workflowId: selectedRemoteWorkflowId || undefined,
+        targetImageField: professionImageTarget,
       })
 
       applyPromptPreviewResult(preview)
@@ -567,6 +606,8 @@ export default function TeacherProfessionsPage() {
           targetId: nextProfession.id,
           imagePrompt: form.image_prompt.trim(),
           imageStyle: form.image_style,
+          workflowId: selectedRemoteWorkflowId || undefined,
+          targetImageField: professionImageTarget,
           ...getPromptOverrides(),
         })
 
@@ -577,6 +618,7 @@ export default function TeacherProfessionsPage() {
         setRemotePreviewProfessionId(nextProfession.id)
         setRemotePreviewPrompt(form.image_prompt.trim())
         setRemotePreviewStyle(form.image_style)
+        setRemotePreviewImageField(professionImageTarget)
         setMessage('共享 ComfyUI 主機已產生職業預覽圖，確認後即可套用。')
         return
       }
@@ -586,6 +628,7 @@ export default function TeacherProfessionsPage() {
         targetId: nextProfession.id,
         imagePrompt: form.image_prompt.trim(),
         imageStyle: form.image_style,
+        targetImageField: professionImageTarget,
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
         modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
@@ -638,7 +681,7 @@ export default function TeacherProfessionsPage() {
       const { data, error: updateError } = await supabase
         .from('profession_templates')
         .update({
-          icon_url: uploadResult.publicUrl,
+          [remotePreviewImageField]: uploadResult.publicUrl,
           image_prompt: remotePreviewPrompt || null,
           image_style: remotePreviewStyle,
         })
@@ -807,6 +850,46 @@ export default function TeacherProfessionsPage() {
                 <span className="text-sm text-slate-300">AI 提示詞補充</span>
                 <textarea value={form.image_prompt} onChange={event => setForm(previous => ({ ...previous, image_prompt: event.target.value }))} rows={2} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white" />
               </label>
+
+              <div className="space-y-2">
+                <span className="text-sm text-slate-300">生圖要套用到</span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: 'icon_url', label: '通用圖' },
+                    { value: 'icon_url_male', label: '男生圖' },
+                    { value: 'icon_url_female', label: '女生圖' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setProfessionImageTarget(option.value as ProfessionImageTarget)}
+                      className={`rounded-lg px-3 py-2 text-sm ${
+                        professionImageTarget === option.value ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {aiSource === 'remote_comfyui' ? (
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm text-slate-300">共享工作流</span>
+                  <select
+                    value={selectedRemoteWorkflowId}
+                    onChange={event => setSelectedRemoteWorkflowId(event.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
+                  >
+                    <option value="">{loadingRemoteWorkflows ? '讀取中...' : '使用共享主機預設 workflow'}</option>
+                    {availableRemoteWorkflows.map(workflow => (
+                      <option key={workflow.id} value={workflow.id}>
+                        {workflow.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </div>
 
             <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
@@ -818,8 +901,8 @@ export default function TeacherProfessionsPage() {
               <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-white/10 shadow-lg" style={{ backgroundColor: form.theme_color }}>
                 {remotePreviewUrl ? (
                   <img src={remotePreviewUrl} alt={form.name || '????'} className="h-full w-full object-cover" />
-                ) : form.icon_url ? (
-                  <img src={form.icon_url} alt={form.name || '職業預覽'} className="h-full w-full object-cover" />
+                ) : currentProfessionImageUrl ? (
+                  <img src={currentProfessionImageUrl} alt={form.name || '職業預覽'} className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full flex-col justify-between bg-black/10 p-4 text-white">
                     <div className="flex items-start justify-between gap-2">
@@ -1031,7 +1114,7 @@ export default function TeacherProfessionsPage() {
                     </label>
 
                     <label className="space-y-2">
-                      <span className="text-xs text-slate-400">每 10 等增加</span>
+                      <span className="text-xs text-slate-400">每升 1 級增加</span>
                       <input type="number" step="0.01" value={effect.per_level_value} onChange={event => updateEffect(index, 'per_level_value', Number(event.target.value))} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-white" />
                     </label>
 
@@ -1044,7 +1127,7 @@ export default function TeacherProfessionsPage() {
                   <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-slate-900/70 px-3 py-2 text-sm text-slate-300">
                     <span>{EFFECT_LABELS[effect.effect_type]}</span>
                     <span className="font-semibold text-emerald-300">
-                      基礎 {formatEffectValue(effect.effect_type, effect.base_value)} / 每 10 等 {formatEffectValue(effect.effect_type, effect.per_level_value)}
+                      基礎 {formatEffectValue(effect.effect_type, effect.base_value)} / 每升 1 級 {formatEffectValue(effect.effect_type, effect.per_level_value)}
                     </span>
                   </div>
                 </div>
@@ -1223,7 +1306,7 @@ export default function TeacherProfessionsPage() {
                   <div key={effect.id} className="rounded-xl bg-slate-900/60 px-4 py-3">
                     <p className="text-sm text-slate-300">{EFFECT_LABELS[effect.effect_type]}</p>
                     <p className="mt-1 text-lg font-semibold text-emerald-300">{formatEffectValue(effect.effect_type, effect.base_value)}</p>
-                    <p className="mt-1 text-xs text-slate-500">每 10 等增加 {formatEffectValue(effect.effect_type, effect.per_level_value)}</p>
+                    <p className="mt-1 text-xs text-slate-500">每升 1 級增加 {formatEffectValue(effect.effect_type, effect.per_level_value)}</p>
                   </div>
                 ))}
               </div>

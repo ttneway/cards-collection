@@ -5,9 +5,9 @@ import TeacherCardManagementTabs from '../components/TeacherCardManagementTabs'
 import { DEFAULT_HUGGING_FACE_AUTHOR, DEFAULT_HUGGING_FACE_MODEL_NAME, buildHuggingFaceModelPath, formatDiagnosticsText, invokeAiImageFunction, loadAiPromptPreview, type PromptPreviewResult } from '../lib/aiImage'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
-import { checkRemoteAiGateway, generateRemoteCardPreview, loadRemoteAiSettings, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
+import { checkRemoteAiGateway, generateRemoteCardPreview, loadRemoteAiSettings, loadRemoteAiWorkflows, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
 import { supabase } from '../lib/supabase'
-import type { Card, CardAlbum, Rarity, RemoteAiSettings } from '../types'
+import type { Card, CardAlbum, Rarity, RemoteAiSettings, RemoteAiWorkflow } from '../types'
 import { clampNumber, readStoredNumber } from '../utils/helpers'
 
 declare const __APP_VERSION__: string
@@ -135,6 +135,9 @@ export default function TeacherCardsPage() {
   const [loadingRemoteAiSettings, setLoadingRemoteAiSettings] = useState(false)
   const [remoteAiHealth, setRemoteAiHealth] = useState<RemoteAiGatewayHealth | null>(null)
   const [testingRemoteAi, setTestingRemoteAi] = useState(false)
+  const [remoteWorkflows, setRemoteWorkflows] = useState<RemoteAiWorkflow[]>([])
+  const [loadingRemoteWorkflows, setLoadingRemoteWorkflows] = useState(false)
+  const [selectedRemoteWorkflowId, setSelectedRemoteWorkflowId] = useState<string>('')
   const [remotePreviewUrl, setRemotePreviewUrl] = useState<string | null>(null)
   const [remotePreviewBase64, setRemotePreviewBase64] = useState<string | null>(null)
   const [remotePreviewMimeType, setRemotePreviewMimeType] = useState<string | null>(null)
@@ -156,8 +159,12 @@ export default function TeacherCardsPage() {
   const canUseRemoteAi =
     Boolean(remoteAiSettings?.is_enabled) &&
     Boolean(remoteAiSettings?.base_url.trim()) &&
-    Boolean(remoteAiSettings?.workflow_api_json.trim()) &&
+    Boolean((remoteAiSettings?.workflow_api_json ?? '').trim() || remoteWorkflows.some(workflow => workflow.is_active && (workflow.target_type === 'all' || workflow.target_type === 'card'))) &&
     Boolean(remoteAiSettings?.shared_secret_configured)
+  const availableRemoteWorkflows = useMemo(
+    () => remoteWorkflows.filter(workflow => workflow.is_active && (workflow.target_type === 'all' || workflow.target_type === 'card')),
+    [remoteWorkflows]
+  )
   const hasAlbums = albums.length > 0
   const cardGridMinWidth = useMemo(() => Math.round(220 * (cardScale / 100)), [cardScale])
   const huggingFaceModel = buildHuggingFaceModelPath(huggingFaceAuthor, huggingFaceModelName)
@@ -167,6 +174,7 @@ export default function TeacherCardsPage() {
     void Promise.all([loadAlbums(), loadCards()])
     void loadAiImageStatus()
     void refreshRemoteAiSettings()
+    void refreshRemoteWorkflows()
   }, [])
 
   useEffect(() => {
@@ -236,6 +244,19 @@ export default function TeacherCardsPage() {
       setError(settingsError instanceof Error ? settingsError.message : '無法載入共享生圖主機設定。')
     } finally {
       setLoadingRemoteAiSettings(false)
+    }
+  }
+
+  async function refreshRemoteWorkflows() {
+    setLoadingRemoteWorkflows(true)
+
+    try {
+      const nextWorkflows = await loadRemoteAiWorkflows()
+      setRemoteWorkflows(nextWorkflows)
+    } catch (workflowError) {
+      setError(workflowError instanceof Error ? workflowError.message : '無法載入共享工作流清單。')
+    } finally {
+      setLoadingRemoteWorkflows(false)
     }
   }
 
@@ -498,6 +519,7 @@ export default function TeacherCardsPage() {
         imagePrompt: cardForm.image_prompt.trim(),
         imageStyle: cardForm.image_style,
         generationSource: aiSource,
+        workflowId: selectedRemoteWorkflowId || undefined,
       })
 
       applyPromptPreviewResult(preview)
@@ -524,6 +546,7 @@ export default function TeacherCardsPage() {
           cardId: card.id,
           imagePrompt: cardForm.image_prompt.trim(),
           imageStyle: cardForm.image_style,
+          workflowId: selectedRemoteWorkflowId || undefined,
           ...getPromptOverrides(),
         })
 
@@ -593,6 +616,7 @@ export default function TeacherCardsPage() {
           cardId: card.id,
           imagePrompt: card.image_prompt ?? '',
           imageStyle: card.image_style ?? CARD_IMAGE_STYLE_OPTIONS[0],
+          workflowId: selectedRemoteWorkflowId || undefined,
         })
 
         clearRemotePreview(true)
@@ -1087,6 +1111,21 @@ export default function TeacherCardsPage() {
                         </div>
                       </div>
                     ) : null}
+                    <label className="space-y-1">
+                      <span className="text-xs text-slate-400">共享工作流</span>
+                      <select
+                        value={selectedRemoteWorkflowId}
+                        onChange={event => setSelectedRemoteWorkflowId(event.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">{loadingRemoteWorkflows ? '讀取中...' : '使用共享主機預設 workflow'}</option>
+                        {availableRemoteWorkflows.map(workflow => (
+                          <option key={workflow.id} value={workflow.id}>
+                            {workflow.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     {remotePreviewUrl ? (
                       <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
                         <div className="flex items-center gap-2 text-xs font-medium text-emerald-100">

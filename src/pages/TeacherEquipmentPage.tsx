@@ -13,11 +13,11 @@ import {
   type PromptPreviewResult,
 } from '../lib/aiImage'
 import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
-import { checkRemoteAiGateway, generateRemoteImagePreview, loadRemoteAiSettings, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
+import { checkRemoteAiGateway, generateRemoteImagePreview, loadRemoteAiSettings, loadRemoteAiWorkflows, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
 import { supabase } from '../lib/supabase'
 import { EFFECT_LABELS, SLOT_LABELS, STYLE_OPTIONS, formatEffectValue, formatEquipmentRarity, getBalanceWarnings } from '../lib/character'
 import { useAuthStore } from '../stores/authStore'
-import type { EquipmentEffect, EquipmentSlotType, EquipmentSourceType, EquipmentTemplate, ProfessionEffectType, Profile, Rarity, RemoteAiSettings } from '../types'
+import type { EquipmentEffect, EquipmentSlotType, EquipmentSourceType, EquipmentTemplate, ProfessionEffectType, Profile, Rarity, RemoteAiSettings, RemoteAiWorkflow } from '../types'
 
 type EquipmentWithEffects = EquipmentTemplate & { equipment_effects?: EquipmentEffect[] }
 
@@ -123,6 +123,9 @@ export default function TeacherEquipmentPage() {
   const [loadingRemoteAiSettings, setLoadingRemoteAiSettings] = useState(false)
   const [remoteAiHealth, setRemoteAiHealth] = useState<RemoteAiGatewayHealth | null>(null)
   const [testingRemoteAi, setTestingRemoteAi] = useState(false)
+  const [remoteWorkflows, setRemoteWorkflows] = useState<RemoteAiWorkflow[]>([])
+  const [loadingRemoteWorkflows, setLoadingRemoteWorkflows] = useState(false)
+  const [selectedRemoteWorkflowId, setSelectedRemoteWorkflowId] = useState<string>('')
   const [remotePreviewUrl, setRemotePreviewUrl] = useState<string | null>(null)
   const [remotePreviewBase64, setRemotePreviewBase64] = useState<string | null>(null)
   const [remotePreviewMimeType, setRemotePreviewMimeType] = useState<string | null>(null)
@@ -141,8 +144,12 @@ export default function TeacherEquipmentPage() {
   const canUseRemoteAi =
     Boolean(remoteAiSettings?.is_enabled) &&
     Boolean(remoteAiSettings?.base_url.trim()) &&
-    Boolean(remoteAiSettings?.workflow_api_json.trim()) &&
+    Boolean((remoteAiSettings?.workflow_api_json ?? '').trim() || remoteWorkflows.some(workflow => workflow.is_active && (workflow.target_type === 'all' || workflow.target_type === 'equipment'))) &&
     Boolean(remoteAiSettings?.shared_secret_configured)
+  const availableRemoteWorkflows = useMemo(
+    () => remoteWorkflows.filter(workflow => workflow.is_active && (workflow.target_type === 'all' || workflow.target_type === 'equipment')),
+    [remoteWorkflows]
+  )
   const huggingFaceModel = buildHuggingFaceModelPath(huggingFaceAuthor, huggingFaceModelName)
   const aiSourceRef = useRef<(typeof AI_SOURCE_OPTIONS)[number]['value']>(aiSource)
 
@@ -150,6 +157,7 @@ export default function TeacherEquipmentPage() {
     void Promise.all([loadEquipments(), loadGrantTargets()])
     void loadAiImageStatus()
     void refreshRemoteAiSettings()
+    void refreshRemoteWorkflows()
   }, [])
 
   useEffect(() => {
@@ -460,6 +468,19 @@ export default function TeacherEquipmentPage() {
     }
   }
 
+  const refreshRemoteWorkflows = async () => {
+    setLoadingRemoteWorkflows(true)
+
+    try {
+      const nextWorkflows = await loadRemoteAiWorkflows()
+      setRemoteWorkflows(nextWorkflows)
+    } catch (workflowError) {
+      setError(workflowError instanceof Error ? workflowError.message : '讀取共享工作流清單失敗。')
+    } finally {
+      setLoadingRemoteWorkflows(false)
+    }
+  }
+
   const getPromptOverrides = () => {
     if (!promptEditor.visible || !promptEditor.finalPrompt.trim()) {
       return {
@@ -520,6 +541,7 @@ export default function TeacherEquipmentPage() {
         imagePrompt: equipmentForm.image_prompt.trim(),
         imageStyle: equipmentForm.image_style,
         generationSource: aiSource,
+        workflowId: selectedRemoteWorkflowId || undefined,
       })
 
       applyPromptPreviewResult(preview)
@@ -557,6 +579,7 @@ export default function TeacherEquipmentPage() {
           targetId: nextEquipment.id,
           imagePrompt: equipmentForm.image_prompt.trim(),
           imageStyle: equipmentForm.image_style,
+          workflowId: selectedRemoteWorkflowId || undefined,
           ...getPromptOverrides(),
         })
 
@@ -976,6 +999,22 @@ export default function TeacherEquipmentPage() {
                         </div>
                       </div>
                     ) : null}
+
+                    <label className="space-y-1">
+                      <span className="text-xs text-slate-400">共享工作流</span>
+                      <select
+                        value={selectedRemoteWorkflowId}
+                        onChange={event => setSelectedRemoteWorkflowId(event.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">{loadingRemoteWorkflows ? '讀取中...' : '使用共享主機預設 workflow'}</option>
+                        {availableRemoteWorkflows.map(workflow => (
+                          <option key={workflow.id} value={workflow.id}>
+                            {workflow.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
                     {remotePreviewUrl ? (
                       <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">

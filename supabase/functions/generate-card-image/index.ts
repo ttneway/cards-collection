@@ -64,6 +64,14 @@ type RemoteAiSettingsRow = {
   is_enabled: boolean
 }
 
+type RemoteAiWorkflowRow = {
+  id: string
+  name: string
+  target_type: 'all' | TargetType
+  workflow_api_json: string
+  is_active: boolean
+}
+
 type GenerationSuccess = {
   base64Image: string
   mimeType: string
@@ -210,6 +218,12 @@ function normalizeTargetType(value: unknown): TargetType {
   const targetType = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (targetType === 'equipment' || targetType === 'profession') return targetType
   return 'card'
+}
+
+function normalizeProfessionImageField(value: unknown) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  if (normalized === 'icon_url_male' || normalized === 'icon_url_female') return normalized
+  return 'icon_url'
 }
 
 function getImageGenerationProfile(targetType: TargetType): ImageGenerationProfile {
@@ -407,6 +421,33 @@ async function loadRemoteAiSettings(adminClient: ReturnType<typeof createClient>
   return (data ?? null) as RemoteAiSettingsRow | null
 }
 
+async function loadRemoteAiWorkflow(
+  adminClient: ReturnType<typeof createClient>,
+  workflowId: string,
+  targetType: TargetType
+) {
+  const { data, error } = await adminClient
+    .from('remote_ai_workflows')
+    .select('id, name, target_type, workflow_api_json, is_active')
+    .eq('id', workflowId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(`Failed to load remote AI workflow: ${error.message}`)
+  }
+
+  const workflow = (data ?? null) as RemoteAiWorkflowRow | null
+  if (!workflow || !workflow.is_active) {
+    throw new Error('Selected shared workflow is unavailable.')
+  }
+
+  if (workflow.target_type !== 'all' && workflow.target_type !== targetType) {
+    throw new Error('Selected shared workflow does not support this content type.')
+  }
+
+  return workflow
+}
+
 function generateRemoteSeed(settings: RemoteAiSettingsRow) {
   if (settings.seed_mode === 'fixed' && Number.isFinite(settings.fixed_seed)) {
     return Math.max(0, Math.floor(Number(settings.fixed_seed)))
@@ -569,6 +610,8 @@ Deno.serve(async request => {
     const requestProvider = normalizeProvider(typeof body.aiProvider === 'string' ? body.aiProvider : null)
     const requestApiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
     const requestModelOverride = typeof body.modelOverride === 'string' ? body.modelOverride.trim() : ''
+    const workflowId = typeof body.workflowId === 'string' ? body.workflowId.trim() : ''
+    const targetImageField = normalizeProfessionImageField(body.targetImageField)
     const generationSource =
       typeof body.generationSource === 'string' && body.generationSource.trim() === 'remote_comfyui'
         ? 'remote_comfyui'
@@ -716,7 +759,7 @@ Deno.serve(async request => {
         !remoteSettings.is_enabled ||
         !remoteSettings.base_url.trim() ||
         !remoteSettings.shared_secret?.trim() ||
-        !remoteSettings.workflow_api_json.trim()
+        !remoteWorkflowJson.trim()
       ) {
         return jsonResponse({ error: '共享 ComfyUI 主機尚未完成設定。' }, 400)
       }
@@ -786,6 +829,7 @@ Deno.serve(async request => {
     let remoteRarity = ''
     let remoteCardColor = ''
     let remoteCardDescription = ''
+    let remoteWorkflowJson = ''
     const imageProfile = getImageGenerationProfile(normalizedTargetType)
 
     if (normalizedTargetType === 'card') {
@@ -872,13 +916,20 @@ Deno.serve(async request => {
         nextStyle,
         nextPrompt
       )
+      if (targetImageField === 'icon_url_male') {
+        finalPrompt = `${finalPrompt} Show a clearly male character design that matches this profession.`
+      } else if (targetImageField === 'icon_url_female') {
+        finalPrompt = `${finalPrompt} Show a clearly female character design that matches this profession.`
+      }
       fileLabel = profession.name || profession.id
       fileFolder = 'professions'
-      imageField = 'icon_url'
+      imageField = targetImageField
     }
 
     const useRemotePromptSettings = generationSource === 'remote_comfyui' || action === 'remote_preview'
     const remoteSettings = useRemotePromptSettings ? await loadRemoteAiSettings(adminClient) : null
+    const selectedWorkflow = workflowId && useRemotePromptSettings ? await loadRemoteAiWorkflow(adminClient, workflowId, normalizedTargetType) : null
+    remoteWorkflowJson = selectedWorkflow?.workflow_api_json ?? remoteSettings?.workflow_api_json ?? ''
     const resolvedNegativePrompt = useRemotePromptSettings ? negativePromptOverride || (remoteSettings?.negative_prompt ?? '') : ''
     const resolvedSeed = useRemotePromptSettings ? seedOverride ?? (remoteSettings ? generateRemoteSeed(remoteSettings) : null) : null
     const resolvedFinalPrompt = finalPromptOverride || finalPrompt
@@ -928,7 +979,7 @@ Deno.serve(async request => {
       }
 
       const remoteGeneration = await callRemoteGatewayGenerate(remoteSettings, {
-        workflow: remoteSettings.workflow_api_json,
+        workflow: remoteWorkflowJson,
         placeholders,
         timeoutMs: 120000,
       })
@@ -1057,7 +1108,7 @@ Deno.serve(async request => {
       const { data, error: updateError } = await adminClient
         .from('profession_templates')
         .update({
-          icon_url: publicUrlData.publicUrl,
+          [imageField]: publicUrlData.publicUrl,
           image_prompt: nextPrompt || null,
           image_style: nextStyle,
         })

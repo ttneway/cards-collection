@@ -363,6 +363,17 @@ export interface RemoteAiSettings {
   updated_by: string | null
 }
 
+export interface RemoteAiWorkflow {
+  id: string
+  name: string
+  target_type: 'all' | 'card' | 'equipment' | 'profession'
+  workflow_api_json: string
+  is_active: boolean
+  sort_order: number
+  updated_at: string | null
+  updated_by: string | null
+}
+
 export interface PlayerEquipment {
   id: string
   user_id: string
