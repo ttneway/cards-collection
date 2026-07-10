@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, ImagePlus, KeyRound, Pencil, Plus, Power, PowerOff, RefreshCw, Save, Server, Sparkles, Upload, Wand2, X } from 'lucide-react'
+import AiPromptEditor from '../components/AiPromptEditor'
 import TeacherCardManagementTabs from '../components/TeacherCardManagementTabs'
-import { DEFAULT_HUGGING_FACE_AUTHOR, DEFAULT_HUGGING_FACE_MODEL_NAME, buildHuggingFaceModelPath, formatDiagnosticsText, invokeAiImageFunction } from '../lib/aiImage'
+import { DEFAULT_HUGGING_FACE_AUTHOR, DEFAULT_HUGGING_FACE_MODEL_NAME, buildHuggingFaceModelPath, formatDiagnosticsText, invokeAiImageFunction, loadAiPromptPreview, type PromptPreviewResult } from '../lib/aiImage'
 import { formatRarityLabel, RARITY_COLORS, RARITY_ORDER } from '../lib/constants'
 import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
 import { checkRemoteAiGateway, generateRemoteCardPreview, loadRemoteAiSettings, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
@@ -43,6 +44,17 @@ type AiDiagnostics = {
   debug?: string | null
 }
 
+type PromptEditorState = {
+  visible: boolean
+  loading: boolean
+  targetId: string | null
+  finalPrompt: string
+  negativePrompt: string
+  seed: string
+  supportsNegativePrompt: boolean
+  supportsSeed: boolean
+}
+
 const CARD_IMAGE_STYLE_OPTIONS = ['Q版校園奇幻', '日系動漫插畫', '紙牌卡框風格'] as const
 const AI_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini' },
@@ -69,6 +81,17 @@ const emptyCardForm: CardForm = {
   image_style: CARD_IMAGE_STYLE_OPTIONS[0],
   is_limited: false,
   is_active: true,
+}
+
+const emptyPromptEditorState: PromptEditorState = {
+  visible: false,
+  loading: false,
+  targetId: null,
+  finalPrompt: '',
+  negativePrompt: '',
+  seed: '',
+  supportsNegativePrompt: false,
+  supportsSeed: false,
 }
 
 function mapCardToForm(card: CardWithAlbum): CardForm {
@@ -119,6 +142,7 @@ export default function TeacherCardsPage() {
   const [remotePreviewPrompt, setRemotePreviewPrompt] = useState<string>('')
   const [remotePreviewStyle, setRemotePreviewStyle] = useState<string>(CARD_IMAGE_STYLE_OPTIONS[0])
   const [applyingRemotePreview, setApplyingRemotePreview] = useState(false)
+  const [promptEditor, setPromptEditor] = useState<PromptEditorState>(emptyPromptEditorState)
   const [cardScale, setCardScale] = useState<number>(() =>
     readStoredNumber(CARD_SCALE_STORAGE_KEY, CARD_SCALE_DEFAULT, CARD_SCALE_MIN, CARD_SCALE_MAX)
   )
@@ -328,6 +352,7 @@ export default function TeacherCardsPage() {
 
   function resetCardForm() {
     clearRemotePreview(true)
+    setPromptEditor(emptyPromptEditorState)
     setEditingCardId(null)
     setCardForm({
       ...emptyCardForm,
@@ -424,6 +449,64 @@ export default function TeacherCardsPage() {
     }
   }
 
+  function getPromptOverrides() {
+    if (!promptEditor.visible || !promptEditor.finalPrompt.trim()) {
+      return {
+        finalPromptOverride: undefined,
+        negativePromptOverride: undefined,
+        seedOverride: undefined,
+      }
+    }
+
+    const parsedSeed = Number(promptEditor.seed.trim())
+
+    return {
+      finalPromptOverride: promptEditor.finalPrompt.trim(),
+      negativePromptOverride: promptEditor.supportsNegativePrompt ? promptEditor.negativePrompt.trim() : undefined,
+      seedOverride:
+        promptEditor.supportsSeed && Number.isFinite(parsedSeed) ? Math.max(0, Math.floor(parsedSeed)) : undefined,
+    }
+  }
+
+  function applyPromptPreviewResult(result: PromptPreviewResult) {
+    setPromptEditor({
+      visible: true,
+      loading: false,
+      targetId: result.target_id,
+      finalPrompt: result.final_prompt,
+      negativePrompt: result.negative_prompt ?? '',
+      seed: result.seed === null || result.seed === undefined ? '' : String(result.seed),
+      supportsNegativePrompt: result.supports_negative_prompt,
+      supportsSeed: result.supports_seed,
+    })
+  }
+
+  async function openPromptPreview() {
+    setMessage(null)
+    setError(null)
+    setPromptEditor(previous => ({ ...previous, visible: true, loading: true }))
+
+    try {
+      const { card } = await saveCardRecord()
+      setEditingCardId(card.id)
+      setCardForm(mapCardToForm(card))
+      await loadCards()
+
+      const preview = await loadAiPromptPreview({
+        targetType: 'card',
+        targetId: card.id,
+        imagePrompt: cardForm.image_prompt.trim(),
+        imageStyle: cardForm.image_style,
+        generationSource: aiSource,
+      })
+
+      applyPromptPreviewResult(preview)
+    } catch (previewError) {
+      setPromptEditor(previous => ({ ...previous, loading: false }))
+      setError(previewError instanceof Error ? previewError.message : '無法取得本次提示詞。')
+    }
+  }
+
   async function generateCardImage() {
     setGeneratingCard(true)
     setMessage(null)
@@ -441,6 +524,7 @@ export default function TeacherCardsPage() {
           cardId: card.id,
           imagePrompt: cardForm.image_prompt.trim(),
           imageStyle: cardForm.image_style,
+          ...getPromptOverrides(),
         })
 
         clearRemotePreview(true)
@@ -461,6 +545,7 @@ export default function TeacherCardsPage() {
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
         modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
+        ...getPromptOverrides(),
       })
 
       const data = result.data as Record<string, any> | null
@@ -613,6 +698,7 @@ export default function TeacherCardsPage() {
     if (remotePreviewCardId && remotePreviewCardId !== card.id) {
       clearRemotePreview(true)
     }
+    setPromptEditor(emptyPromptEditorState)
     setEditingCardId(card.id)
     setCardForm(mapCardToForm(card))
     setMessage(`正在編輯卡牌「${card.name}」。`)
@@ -1059,6 +1145,33 @@ export default function TeacherCardsPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
+            <div className="w-full">
+              <AiPromptEditor
+                visible={promptEditor.visible}
+                loading={promptEditor.loading}
+                generating={generatingCard}
+                finalPrompt={promptEditor.finalPrompt}
+                negativePrompt={promptEditor.negativePrompt}
+                seed={promptEditor.seed}
+                supportsNegativePrompt={promptEditor.supportsNegativePrompt}
+                supportsSeed={promptEditor.supportsSeed}
+                onToggle={() => {
+                  if (!promptEditor.visible) {
+                    void openPromptPreview()
+                    return
+                  }
+
+                  setPromptEditor(previous => ({ ...previous, visible: false }))
+                }}
+                onRefresh={() => void openPromptPreview()}
+                onGenerate={() => void generateCardImage()}
+                onFinalPromptChange={value => setPromptEditor(previous => ({ ...previous, finalPrompt: value }))}
+                onNegativePromptChange={value => setPromptEditor(previous => ({ ...previous, negativePrompt: value }))}
+                onSeedChange={value => setPromptEditor(previous => ({ ...previous, seed: value }))}
+                disabled={savingCard || !hasAlbums}
+              />
+            </div>
+
             <button
               type="submit"
               disabled={savingCard || !hasAlbums}

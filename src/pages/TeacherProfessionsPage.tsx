@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, ImagePlus, KeyRound, Plus, RefreshCw, Save, Server, Sparkles, SwitchCamera, Wand2, X } from 'lucide-react'
+import AiPromptEditor from '../components/AiPromptEditor'
 import {
   DEFAULT_HUGGING_FACE_AUTHOR,
   DEFAULT_HUGGING_FACE_MODEL_NAME,
   buildHuggingFaceModelPath,
   formatDiagnosticsText,
   invokeAiImageFunction,
+  loadAiPromptPreview,
   type AiDiagnostics,
   type AiImageStatus,
+  type PromptPreviewResult,
 } from '../lib/aiImage'
 import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
 import { checkRemoteAiGateway, generateRemoteImagePreview, loadRemoteAiSettings, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
@@ -59,6 +62,17 @@ type PreviewBonusesPayload = {
   entries: BonusEntry[]
 }
 
+type PromptEditorState = {
+  visible: boolean
+  loading: boolean
+  targetId: string | null
+  finalPrompt: string
+  negativePrompt: string
+  seed: string
+  supportsNegativePrompt: boolean
+  supportsSeed: boolean
+}
+
 const defaultEffect = (): EffectForm => ({
   effect_type: 'task_points_percent',
   base_value: 1,
@@ -80,6 +94,17 @@ const emptyForm: ProfessionForm = {
   image_style: STYLE_OPTIONS[0],
   unlock_tier: 1,
   is_active: true,
+}
+
+const emptyPromptEditorState: PromptEditorState = {
+  visible: false,
+  loading: false,
+  targetId: null,
+  finalPrompt: '',
+  negativePrompt: '',
+  seed: '',
+  supportsNegativePrompt: false,
+  supportsSeed: false,
 }
 
 export default function TeacherProfessionsPage() {
@@ -112,6 +137,7 @@ export default function TeacherProfessionsPage() {
   const [remotePreviewPrompt, setRemotePreviewPrompt] = useState<string>('')
   const [remotePreviewStyle, setRemotePreviewStyle] = useState<string>(STYLE_OPTIONS[0])
   const [applyingRemotePreview, setApplyingRemotePreview] = useState(false)
+  const [promptEditor, setPromptEditor] = useState<PromptEditorState>(emptyPromptEditorState)
   const [previewLevel, setPreviewLevel] = useState<number>(10)
   const [previewBonuses, setPreviewBonuses] = useState<PreviewBonusesPayload | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -328,6 +354,7 @@ export default function TeacherProfessionsPage() {
 
   const resetForm = () => {
     clearRemotePreview(true)
+    setPromptEditor(emptyPromptEditorState)
     setEditingId(null)
     setForm(emptyForm)
     setEffects([defaultEffect()])
@@ -337,6 +364,7 @@ export default function TeacherProfessionsPage() {
     if (remotePreviewProfessionId && remotePreviewProfessionId !== profession.id) {
       clearRemotePreview(true)
     }
+    setPromptEditor(emptyPromptEditorState)
     setEditingId(profession.id)
     setForm({
       name: profession.name,
@@ -466,6 +494,63 @@ export default function TeacherProfessionsPage() {
     }
   }
 
+  const getPromptOverrides = () => {
+    if (!promptEditor.visible || !promptEditor.finalPrompt.trim()) {
+      return {
+        finalPromptOverride: undefined,
+        negativePromptOverride: undefined,
+        seedOverride: undefined,
+      }
+    }
+
+    const parsedSeed = Number(promptEditor.seed.trim())
+
+    return {
+      finalPromptOverride: promptEditor.finalPrompt.trim(),
+      negativePromptOverride: promptEditor.supportsNegativePrompt ? promptEditor.negativePrompt.trim() : undefined,
+      seedOverride:
+        promptEditor.supportsSeed && Number.isFinite(parsedSeed) ? Math.max(0, Math.floor(parsedSeed)) : undefined,
+    }
+  }
+
+  const applyPromptPreviewResult = (result: PromptPreviewResult) => {
+    setPromptEditor({
+      visible: true,
+      loading: false,
+      targetId: result.target_id,
+      finalPrompt: result.final_prompt,
+      negativePrompt: result.negative_prompt ?? '',
+      seed: result.seed === null || result.seed === undefined ? '' : String(result.seed),
+      supportsNegativePrompt: result.supports_negative_prompt,
+      supportsSeed: result.supports_seed,
+    })
+  }
+
+  const openPromptPreview = async () => {
+    setMessage(null)
+    setError(null)
+    setPromptEditor(previous => ({ ...previous, visible: true, loading: true }))
+
+    try {
+      const nextProfession = await saveProfessionRecord()
+      setEditingId(nextProfession.id)
+      await loadProfessions()
+
+      const preview = await loadAiPromptPreview({
+        targetType: 'profession',
+        targetId: nextProfession.id,
+        imagePrompt: form.image_prompt.trim(),
+        imageStyle: form.image_style,
+        generationSource: aiSource,
+      })
+
+      applyPromptPreviewResult(preview)
+    } catch (previewError) {
+      setPromptEditor(previous => ({ ...previous, loading: false }))
+      setError(previewError instanceof Error ? previewError.message : '無法取得本次提示詞。')
+    }
+  }
+
   const generateProfessionImage = async () => {
     setGeneratingImage(true)
     setMessage(null)
@@ -482,6 +567,7 @@ export default function TeacherProfessionsPage() {
           targetId: nextProfession.id,
           imagePrompt: form.image_prompt.trim(),
           imageStyle: form.image_style,
+          ...getPromptOverrides(),
         })
 
         clearRemotePreview(true)
@@ -503,6 +589,7 @@ export default function TeacherProfessionsPage() {
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
         modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
+        ...getPromptOverrides(),
       })
 
       const data = result.data as Record<string, any> | null
@@ -980,6 +1067,33 @@ export default function TeacherProfessionsPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
+            <div className="w-full">
+              <AiPromptEditor
+                visible={promptEditor.visible}
+                loading={promptEditor.loading}
+                generating={generatingImage}
+                finalPrompt={promptEditor.finalPrompt}
+                negativePrompt={promptEditor.negativePrompt}
+                seed={promptEditor.seed}
+                supportsNegativePrompt={promptEditor.supportsNegativePrompt}
+                supportsSeed={promptEditor.supportsSeed}
+                onToggle={() => {
+                  if (!promptEditor.visible) {
+                    void openPromptPreview()
+                    return
+                  }
+
+                  setPromptEditor(previous => ({ ...previous, visible: false }))
+                }}
+                onRefresh={() => void openPromptPreview()}
+                onGenerate={() => void generateProfessionImage()}
+                onFinalPromptChange={value => setPromptEditor(previous => ({ ...previous, finalPrompt: value }))}
+                onNegativePromptChange={value => setPromptEditor(previous => ({ ...previous, negativePrompt: value }))}
+                onSeedChange={value => setPromptEditor(previous => ({ ...previous, seed: value }))}
+                disabled={saving}
+              />
+            </div>
+
             <button type="submit" disabled={saving} className="rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
               <Save size={18} className="mr-2 inline" />
               {saving ? '儲存中...' : editingId ? '更新職業' : '建立職業'}

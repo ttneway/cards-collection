@@ -64,6 +64,21 @@ export type AiDiagnostics = {
   debug?: string | null
 }
 
+export type PromptPreviewResult = {
+  ok: boolean
+  target_type: 'card' | 'equipment' | 'profession'
+  target_id: string
+  final_prompt: string
+  negative_prompt: string
+  seed: number | null
+  image_width: number | null
+  image_height: number | null
+  aspect_ratio: string | null
+  provider: 'cloud' | 'remote_comfyui'
+  supports_negative_prompt: boolean
+  supports_seed: boolean
+}
+
 export async function invokeAiImageFunction(body: Record<string, unknown>) {
   const {
     data: { session },
@@ -93,6 +108,25 @@ export async function invokeAiImageFunction(body: Record<string, unknown>) {
     status: response.status,
     data: payload,
   }
+}
+
+export async function loadAiPromptPreview(body: Record<string, unknown>) {
+  const result = await invokeAiImageFunction({
+    action: 'prompt_preview',
+    ...body,
+  })
+
+  const data = result.data as Record<string, unknown> | null
+
+  if (!result.ok || !data) {
+    throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+  }
+
+  if (data.error) {
+    throw new Error(data.error as string)
+  }
+
+  return data as unknown as PromptPreviewResult
 }
 
 export function formatDiagnosticsText(diagnostics: AiDiagnostics | string | null | undefined) {

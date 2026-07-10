@@ -415,6 +415,23 @@ function generateRemoteSeed(settings: RemoteAiSettingsRow) {
   return Math.floor(Math.random() * 9007199254740991)
 }
 
+function normalizeSeedOverride(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value))
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim()
+    if (!normalized) return null
+    const parsed = Number(normalized)
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.floor(parsed))
+    }
+  }
+
+  return null
+}
+
 async function callRemoteGatewayHealth(settings: RemoteAiSettingsRow) {
   const response = await fetch(`${settings.base_url.replace(/\/+$/g, '')}/health`, {
     method: 'GET',
@@ -552,6 +569,14 @@ Deno.serve(async request => {
     const requestProvider = normalizeProvider(typeof body.aiProvider === 'string' ? body.aiProvider : null)
     const requestApiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
     const requestModelOverride = typeof body.modelOverride === 'string' ? body.modelOverride.trim() : ''
+    const generationSource =
+      typeof body.generationSource === 'string' && body.generationSource.trim() === 'remote_comfyui'
+        ? 'remote_comfyui'
+        : 'cloud'
+    const finalPromptOverride = typeof body.finalPromptOverride === 'string' ? body.finalPromptOverride.trim() : ''
+    const negativePromptOverride =
+      typeof body.negativePromptOverride === 'string' ? body.negativePromptOverride.trim() : ''
+    const seedOverride = normalizeSeedOverride(body.seedOverride)
     const personalProvider = resolveRequestProvider(requestProvider, requestApiKey)
     const systemProvider = resolveImageProvider(
       systemOpenAiApiKey,
@@ -701,7 +726,7 @@ Deno.serve(async request => {
       }
     }
 
-    if (!activeProvider && action !== 'remote_preview') {
+    if (!activeProvider && action !== 'remote_preview' && action !== 'prompt_preview') {
       return jsonResponse(
         {
           error:
@@ -852,9 +877,30 @@ Deno.serve(async request => {
       imageField = 'icon_url'
     }
 
-    if (action === 'remote_preview') {
-      const remoteSettings = await loadRemoteAiSettings(adminClient)
+    const remoteSettings = generationSource === 'remote_comfyui' || action === 'remote_preview' ? await loadRemoteAiSettings(adminClient) : null
+    const resolvedNegativePrompt =
+      generationSource === 'remote_comfyui' ? negativePromptOverride || (remoteSettings?.negative_prompt ?? '') : ''
+    const resolvedSeed = generationSource === 'remote_comfyui' ? seedOverride ?? (remoteSettings ? generateRemoteSeed(remoteSettings) : null) : null
+    const resolvedFinalPrompt = finalPromptOverride || finalPrompt
 
+    if (action === 'prompt_preview') {
+      return jsonResponse({
+        ok: true,
+        target_type: normalizedTargetType,
+        target_id: resolvedTargetId,
+        final_prompt: resolvedFinalPrompt,
+        negative_prompt: resolvedNegativePrompt,
+        seed: resolvedSeed,
+        image_width: generationSource === 'remote_comfyui' ? imageProfile.huggingFaceWidth : null,
+        image_height: generationSource === 'remote_comfyui' ? imageProfile.huggingFaceHeight : null,
+        aspect_ratio: generationSource === 'remote_comfyui' ? '3:4' : null,
+        provider: generationSource,
+        supports_negative_prompt: generationSource === 'remote_comfyui',
+        supports_seed: generationSource === 'remote_comfyui',
+      })
+    }
+
+    if (action === 'remote_preview') {
       if (
         !remoteSettings ||
         !remoteSettings.is_enabled ||
@@ -866,7 +912,7 @@ Deno.serve(async request => {
       }
 
       const placeholders = {
-        full_prompt: finalPrompt,
+        full_prompt: resolvedFinalPrompt,
         card_name: fileLabel,
         card_description: remoteCardDescription,
         album_name: remoteAlbumName,
@@ -874,11 +920,11 @@ Deno.serve(async request => {
         image_style: nextStyle,
         extra_prompt: nextPrompt,
         card_color: remoteCardColor,
-        negative_prompt: remoteSettings.negative_prompt ?? '',
+        negative_prompt: resolvedNegativePrompt,
         image_width: String(imageProfile.huggingFaceWidth),
         image_height: String(imageProfile.huggingFaceHeight),
         aspect_ratio: '3:4',
-        seed: generateRemoteSeed(remoteSettings),
+        seed: resolvedSeed,
       }
 
       const remoteGeneration = await callRemoteGatewayGenerate(remoteSettings, {
@@ -930,16 +976,16 @@ Deno.serve(async request => {
         provider_label: PROVIDER_LABELS.comfyui_gateway,
         preview_image_base64: previewImageBase64,
         mime_type: mimeType,
-        final_prompt: finalPrompt,
+        final_prompt: resolvedFinalPrompt,
       })
     }
 
     const generationResult =
       activeProvider === 'gemini'
-        ? await generateGeminiImage(finalPrompt, geminiApiKey, geminiModel)
+        ? await generateGeminiImage(resolvedFinalPrompt, geminiApiKey, geminiModel)
         : activeProvider === 'huggingface'
-          ? await generateHuggingFaceImage(finalPrompt, huggingFaceApiKey, selectedModel ?? huggingFaceModel, imageProfile)
-          : await generateOpenAiImage(finalPrompt, openAiApiKey, openAiModel, imageProfile)
+          ? await generateHuggingFaceImage(resolvedFinalPrompt, huggingFaceApiKey, selectedModel ?? huggingFaceModel, imageProfile)
+          : await generateOpenAiImage(resolvedFinalPrompt, openAiApiKey, openAiModel, imageProfile)
 
     if ('error' in generationResult) {
       return jsonResponse(
@@ -1036,7 +1082,7 @@ Deno.serve(async request => {
       provider_label: PROVIDER_LABELS[activeProvider],
       key_source: keySource,
       model: generationResult.modelUsed ?? selectedModel,
-      final_prompt: finalPrompt,
+      final_prompt: resolvedFinalPrompt,
       message: `Image generated with ${PROVIDER_LABELS[activeProvider]}${keySource === 'teacher' ? ' (teacher key)' : ''}.`,
     })
   } catch (error) {

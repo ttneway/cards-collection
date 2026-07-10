@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, Gift, ImagePlus, KeyRound, Plus, RefreshCw, Save, Server, ShoppingBag, Sparkles, Upload, Wand2, X } from 'lucide-react'
+import AiPromptEditor from '../components/AiPromptEditor'
 import {
   DEFAULT_HUGGING_FACE_AUTHOR,
   DEFAULT_HUGGING_FACE_MODEL_NAME,
   buildHuggingFaceModelPath,
   formatDiagnosticsText,
   invokeAiImageFunction,
+  loadAiPromptPreview,
   type AiDiagnostics,
   type AiImageStatus,
+  type PromptPreviewResult,
 } from '../lib/aiImage'
 import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
 import { checkRemoteAiGateway, generateRemoteImagePreview, loadRemoteAiSettings, releaseRemoteAiModels, type RemoteAiGatewayHealth } from '../lib/remoteAi'
@@ -39,6 +42,17 @@ type EquipmentForm = {
 
 type GrantTarget = Pick<Profile, 'id' | 'name' | 'role' | 'class_id'>
 
+type PromptEditorState = {
+  visible: boolean
+  loading: boolean
+  targetId: string | null
+  finalPrompt: string
+  negativePrompt: string
+  seed: string
+  supportsNegativePrompt: boolean
+  supportsSeed: boolean
+}
+
 const AI_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini' },
   { value: 'openai', label: 'OpenAI / ChatGPT' },
@@ -68,6 +82,17 @@ const defaultEffect = (): EffectForm => ({
   base_value: 1,
   description: '',
 })
+
+const emptyPromptEditorState: PromptEditorState = {
+  visible: false,
+  loading: false,
+  targetId: null,
+  finalPrompt: '',
+  negativePrompt: '',
+  seed: '',
+  supportsNegativePrompt: false,
+  supportsSeed: false,
+}
 
 export default function TeacherEquipmentPage() {
   const { user } = useAuthStore()
@@ -105,6 +130,7 @@ export default function TeacherEquipmentPage() {
   const [remotePreviewPrompt, setRemotePreviewPrompt] = useState<string>('')
   const [remotePreviewStyle, setRemotePreviewStyle] = useState<string>(STYLE_OPTIONS[0])
   const [applyingRemotePreview, setApplyingRemotePreview] = useState(false)
+  const [promptEditor, setPromptEditor] = useState<PromptEditorState>(emptyPromptEditorState)
 
   const warnings = useMemo(
     () => getBalanceWarnings(effects.length, effects.map(effect => effect.effect_type)),
@@ -306,6 +332,7 @@ export default function TeacherEquipmentPage() {
 
   const resetForm = () => {
     clearRemotePreview(true)
+    setPromptEditor(emptyPromptEditorState)
     setEditingId(null)
     setEquipmentForm(emptyEquipmentForm)
     setEffects([defaultEffect()])
@@ -315,6 +342,7 @@ export default function TeacherEquipmentPage() {
     if (remotePreviewEquipmentId && remotePreviewEquipmentId !== equipment.id) {
       clearRemotePreview(true)
     }
+    setPromptEditor(emptyPromptEditorState)
     setEditingId(equipment.id)
     setEquipmentForm({
       name: equipment.name,
@@ -432,6 +460,75 @@ export default function TeacherEquipmentPage() {
     }
   }
 
+  const getPromptOverrides = () => {
+    if (!promptEditor.visible || !promptEditor.finalPrompt.trim()) {
+      return {
+        finalPromptOverride: undefined,
+        negativePromptOverride: undefined,
+        seedOverride: undefined,
+      }
+    }
+
+    const parsedSeed = Number(promptEditor.seed.trim())
+
+    return {
+      finalPromptOverride: promptEditor.finalPrompt.trim(),
+      negativePromptOverride: promptEditor.supportsNegativePrompt ? promptEditor.negativePrompt.trim() : undefined,
+      seedOverride:
+        promptEditor.supportsSeed && Number.isFinite(parsedSeed) ? Math.max(0, Math.floor(parsedSeed)) : undefined,
+    }
+  }
+
+  const applyPromptPreviewResult = (result: PromptPreviewResult) => {
+    setPromptEditor({
+      visible: true,
+      loading: false,
+      targetId: result.target_id,
+      finalPrompt: result.final_prompt,
+      negativePrompt: result.negative_prompt ?? '',
+      seed: result.seed === null || result.seed === undefined ? '' : String(result.seed),
+      supportsNegativePrompt: result.supports_negative_prompt,
+      supportsSeed: result.supports_seed,
+    })
+  }
+
+  const openPromptPreview = async () => {
+    setMessage(null)
+    setError(null)
+    setPromptEditor(previous => ({ ...previous, visible: true, loading: true }))
+
+    try {
+      const nextEquipment = await saveEquipmentRecord()
+      setEditingId(nextEquipment.id)
+      setEquipmentForm({
+        name: nextEquipment.name,
+        slot_type: nextEquipment.slot_type,
+        rarity: nextEquipment.rarity,
+        description: nextEquipment.description ?? '',
+        image_url: nextEquipment.image_url ?? '',
+        image_prompt: nextEquipment.image_prompt ?? '',
+        image_style: nextEquipment.image_style ?? STYLE_OPTIONS[0],
+        source_type: nextEquipment.source_type,
+        shop_cost: nextEquipment.shop_cost?.toString() ?? '',
+        is_active: nextEquipment.is_active,
+      })
+      await loadEquipments()
+
+      const preview = await loadAiPromptPreview({
+        targetType: 'equipment',
+        targetId: nextEquipment.id,
+        imagePrompt: equipmentForm.image_prompt.trim(),
+        imageStyle: equipmentForm.image_style,
+        generationSource: aiSource,
+      })
+
+      applyPromptPreviewResult(preview)
+    } catch (previewError) {
+      setPromptEditor(previous => ({ ...previous, loading: false }))
+      setError(previewError instanceof Error ? previewError.message : '無法取得本次提示詞。')
+    }
+  }
+
   const generateEquipmentImage = async () => {
     setGeneratingImage(true)
     setMessage(null)
@@ -460,6 +557,7 @@ export default function TeacherEquipmentPage() {
           targetId: nextEquipment.id,
           imagePrompt: equipmentForm.image_prompt.trim(),
           imageStyle: equipmentForm.image_style,
+          ...getPromptOverrides(),
         })
 
         clearRemotePreview(true)
@@ -481,6 +579,7 @@ export default function TeacherEquipmentPage() {
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
         modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
+        ...getPromptOverrides(),
       })
 
       const data = result.data as Record<string, any> | null
@@ -962,6 +1061,33 @@ export default function TeacherEquipmentPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
+            <div className="w-full">
+              <AiPromptEditor
+                visible={promptEditor.visible}
+                loading={promptEditor.loading}
+                generating={generatingImage}
+                finalPrompt={promptEditor.finalPrompt}
+                negativePrompt={promptEditor.negativePrompt}
+                seed={promptEditor.seed}
+                supportsNegativePrompt={promptEditor.supportsNegativePrompt}
+                supportsSeed={promptEditor.supportsSeed}
+                onToggle={() => {
+                  if (!promptEditor.visible) {
+                    void openPromptPreview()
+                    return
+                  }
+
+                  setPromptEditor(previous => ({ ...previous, visible: false }))
+                }}
+                onRefresh={() => void openPromptPreview()}
+                onGenerate={() => void generateEquipmentImage()}
+                onFinalPromptChange={value => setPromptEditor(previous => ({ ...previous, finalPrompt: value }))}
+                onNegativePromptChange={value => setPromptEditor(previous => ({ ...previous, negativePrompt: value }))}
+                onSeedChange={value => setPromptEditor(previous => ({ ...previous, seed: value }))}
+                disabled={saving}
+              />
+            </div>
+
             <button type="submit" disabled={saving} className="rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
               <Save size={18} className="mr-2 inline" />
               {saving ? '儲存中...' : editingId ? '更新裝備' : '建立裝備'}

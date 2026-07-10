@@ -90,6 +90,9 @@ export async function generateRemoteImagePreview(input: {
   targetId: string
   imagePrompt: string
   imageStyle: string
+  finalPromptOverride?: string
+  negativePromptOverride?: string
+  seedOverride?: number | null
 }) {
   const result = await invokeAiImageFunction({
     action: 'remote_preview',
@@ -97,6 +100,9 @@ export async function generateRemoteImagePreview(input: {
     targetId: input.targetId,
     imagePrompt: input.imagePrompt,
     imageStyle: input.imageStyle,
+    finalPromptOverride: input.finalPromptOverride,
+    negativePromptOverride: input.negativePromptOverride,
+    seedOverride: input.seedOverride,
   })
 
   const data = result.data as Record<string, unknown> | null
@@ -116,12 +122,18 @@ export async function generateRemoteCardPreview(input: {
   cardId: string
   imagePrompt: string
   imageStyle: string
+  finalPromptOverride?: string
+  negativePromptOverride?: string
+  seedOverride?: number | null
 }) {
   return generateRemoteImagePreview({
     targetType: 'card',
     targetId: input.cardId,
     imagePrompt: input.imagePrompt,
     imageStyle: input.imageStyle,
+    finalPromptOverride: input.finalPromptOverride,
+    negativePromptOverride: input.negativePromptOverride,
+    seedOverride: input.seedOverride,
   })
 }
 
