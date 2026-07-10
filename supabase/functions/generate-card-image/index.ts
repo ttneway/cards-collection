@@ -877,10 +877,10 @@ Deno.serve(async request => {
       imageField = 'icon_url'
     }
 
-    const remoteSettings = generationSource === 'remote_comfyui' || action === 'remote_preview' ? await loadRemoteAiSettings(adminClient) : null
-    const resolvedNegativePrompt =
-      generationSource === 'remote_comfyui' ? negativePromptOverride || (remoteSettings?.negative_prompt ?? '') : ''
-    const resolvedSeed = generationSource === 'remote_comfyui' ? seedOverride ?? (remoteSettings ? generateRemoteSeed(remoteSettings) : null) : null
+    const useRemotePromptSettings = generationSource === 'remote_comfyui' || action === 'remote_preview'
+    const remoteSettings = useRemotePromptSettings ? await loadRemoteAiSettings(adminClient) : null
+    const resolvedNegativePrompt = useRemotePromptSettings ? negativePromptOverride || (remoteSettings?.negative_prompt ?? '') : ''
+    const resolvedSeed = useRemotePromptSettings ? seedOverride ?? (remoteSettings ? generateRemoteSeed(remoteSettings) : null) : null
     const resolvedFinalPrompt = finalPromptOverride || finalPrompt
 
     if (action === 'prompt_preview') {
@@ -891,12 +891,12 @@ Deno.serve(async request => {
         final_prompt: resolvedFinalPrompt,
         negative_prompt: resolvedNegativePrompt,
         seed: resolvedSeed,
-        image_width: generationSource === 'remote_comfyui' ? imageProfile.huggingFaceWidth : null,
-        image_height: generationSource === 'remote_comfyui' ? imageProfile.huggingFaceHeight : null,
-        aspect_ratio: generationSource === 'remote_comfyui' ? '3:4' : null,
+        image_width: useRemotePromptSettings ? imageProfile.huggingFaceWidth : null,
+        image_height: useRemotePromptSettings ? imageProfile.huggingFaceHeight : null,
+        aspect_ratio: useRemotePromptSettings ? '3:4' : null,
         provider: generationSource,
-        supports_negative_prompt: generationSource === 'remote_comfyui',
-        supports_seed: generationSource === 'remote_comfyui',
+        supports_negative_prompt: useRemotePromptSettings,
+        supports_seed: useRemotePromptSettings,
       })
     }
 
