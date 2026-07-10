@@ -46,6 +46,14 @@ if ($running) {
   exit 0
 }
 
+function Quote-Arg([string]$value) {
+  if ($value -match '[\s"]') {
+    return '"' + ($value -replace '"', '\"') + '"'
+  }
+
+  return $value
+}
+
 $argumentList = @(
   '-s',
   'ComfyUI\main.py',
@@ -68,10 +76,10 @@ $argumentList = @(
   $inputDir,
   '--output-directory',
   $outputDir
-)
+) | ForEach-Object { Quote-Arg $_ }
 
 Start-Process -FilePath $pythonExe `
-  -ArgumentList $argumentList `
+  -ArgumentList ($argumentList -join ' ') `
   -WorkingDirectory $installPath `
   -RedirectStandardOutput $stdoutLog `
   -RedirectStandardError $stderrLog `
