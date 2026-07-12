@@ -278,7 +278,7 @@ export default function TeacherRemoteAiPage() {
     try {
       const nextSortOrder =
         workflows.length > 0 ? Math.max(...workflows.map(workflow => Number(workflow.sort_order ?? 0))) + 10 : 10
-      const nextName = `???? ${workflows.length + 1}`
+      const nextName = `新工作流 ${workflows.length + 1}`
       const draftWorkflow: WorkflowFormState = {
         id: null,
         name: nextName,
@@ -300,9 +300,9 @@ export default function TeacherRemoteAiPage() {
 
       await refreshWorkflows()
       setWorkflowForm(mapWorkflowToForm(nextWorkflow))
-      setMessage(`????${nextName}??????????????`)
+      setMessage(`已新增「${nextName}」，可以直接在右側繼續修改。`)
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : '??????????')
+      setError(createError instanceof Error ? createError.message : '新增共享工作流失敗。')
     } finally {
       setSavingWorkflow(false)
     }
