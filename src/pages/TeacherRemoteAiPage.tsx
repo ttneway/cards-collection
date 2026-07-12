@@ -278,7 +278,17 @@ export default function TeacherRemoteAiPage() {
     try {
       const nextSortOrder =
         workflows.length > 0 ? Math.max(...workflows.map(workflow => Number(workflow.sort_order ?? 0))) + 10 : 10
-      const nextName = `新工作流 ${workflows.length + 1}`
+      const nextName = `???? ${workflows.length + 1}`
+      const draftWorkflow: WorkflowFormState = {
+        id: null,
+        name: nextName,
+        targetType: 'all',
+        workflowApiJson: DEFAULT_WORKFLOW_TEMPLATE,
+        sortOrder: String(nextSortOrder),
+        isActive: true,
+      }
+
+      setWorkflowForm(draftWorkflow)
 
       const nextWorkflow = await saveRemoteAiWorkflow({
         name: nextName,
@@ -290,9 +300,9 @@ export default function TeacherRemoteAiPage() {
 
       await refreshWorkflows()
       setWorkflowForm(mapWorkflowToForm(nextWorkflow))
-      setMessage(`已新增「${nextName}」，可以直接在右側繼續修改。`)
+      setMessage(`????${nextName}??????????????`)
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : '新增共享工作流失敗。')
+      setError(createError instanceof Error ? createError.message : '??????????')
     } finally {
       setSavingWorkflow(false)
     }
@@ -537,8 +547,8 @@ export default function TeacherRemoteAiPage() {
               disabled={savingWorkflow}
               className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-600"
             >
-              <Plus size={16} />
-              新工作流
+              {savingWorkflow ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />}
+              ?????
             </button>
           ) : null}
         </div>
