@@ -268,6 +268,36 @@ export default function TeacherRemoteAiPage() {
     }
   }
 
+  async function handleWorkflowCreate() {
+    if (!canEdit) return
+
+    setSavingWorkflow(true)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const nextSortOrder =
+        workflows.length > 0 ? Math.max(...workflows.map(workflow => Number(workflow.sort_order ?? 0))) + 10 : 10
+      const nextName = `新工作流 ${workflows.length + 1}`
+
+      const nextWorkflow = await saveRemoteAiWorkflow({
+        name: nextName,
+        targetType: 'all',
+        workflowApiJson: DEFAULT_WORKFLOW_TEMPLATE,
+        isActive: true,
+        sortOrder: nextSortOrder,
+      })
+
+      await refreshWorkflows()
+      setWorkflowForm(mapWorkflowToForm(nextWorkflow))
+      setMessage(`已新增「${nextName}」，可以直接在右側繼續修改。`)
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : '新增共享工作流失敗。')
+    } finally {
+      setSavingWorkflow(false)
+    }
+  }
+
   async function handleWorkflowDelete(id: string) {
     if (!canEdit) return
 
@@ -503,7 +533,8 @@ export default function TeacherRemoteAiPage() {
           {canEdit ? (
             <button
               type="button"
-              onClick={() => setWorkflowForm(emptyWorkflowForm)}
+              onClick={() => void handleWorkflowCreate()}
+              disabled={savingWorkflow}
               className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-600"
             >
               <Plus size={16} />
