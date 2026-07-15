@@ -8,7 +8,7 @@ function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, '-')
 }
 
-async function uploadImageBlob(blob: Blob, folder: 'cards' | 'equipment' | 'professions', fileNameBase: string, extensionOverride?: string) {
+async function uploadImageBlob(blob: Blob, folder: 'cards' | 'equipment' | 'professions' | 'achievements', fileNameBase: string, extensionOverride?: string) {
   if (!ALLOWED_IMAGE_TYPES.has(blob.type)) {
     throw new Error('只支援 PNG、JPG、JPEG、WEBP 圖片。')
   }
@@ -42,12 +42,12 @@ async function uploadImageBlob(blob: Blob, folder: 'cards' | 'equipment' | 'prof
   }
 }
 
-export async function uploadImageFile(file: File, folder: 'cards' | 'equipment' | 'professions') {
+export async function uploadImageFile(file: File, folder: 'cards' | 'equipment' | 'professions' | 'achievements') {
   const extension = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() ?? 'png' : undefined
   const fileNameBase = file.name.replace(/\.[^.]+$/, '') || `${folder}-image`
   return uploadImageBlob(file, folder, fileNameBase, extension)
 }
 
-export async function uploadGeneratedImageBlob(blob: Blob, folder: 'cards' | 'equipment' | 'professions', fileNameBase: string) {
+export async function uploadGeneratedImageBlob(blob: Blob, folder: 'cards' | 'equipment' | 'professions' | 'achievements', fileNameBase: string) {
   return uploadImageBlob(blob, folder, fileNameBase)
 }

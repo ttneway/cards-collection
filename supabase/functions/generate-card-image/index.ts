@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.2'
 import { InferenceClient } from 'https://esm.sh/@huggingface/inference'
-import { buildCardPrompt, buildEquipmentPrompt, buildProfessionPrompt, DEFAULT_IMAGE_STYLE } from '../../../src/lib/aiPromptBuilder.ts'
+import { buildAchievementPrompt, buildCardPrompt, buildEquipmentPrompt, buildProfessionPrompt, DEFAULT_IMAGE_STYLE } from '../../../src/lib/aiPromptBuilder.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,7 +14,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   comfyui_gateway: '共享 ComfyUI 主機',
 }
 
-type TargetType = 'card' | 'equipment' | 'profession'
+type TargetType = 'card' | 'equipment' | 'profession' | 'achievement'
 
 type CardRow = {
   id: string
@@ -51,6 +51,18 @@ type ProfessionRow = {
   image_prompt: string | null
   image_style: string | null
   unlock_tier: number
+}
+
+type AchievementRow = {
+  id: string
+  name: string
+  description: string | null
+  category: string | null
+  progress_mode: string | null
+  image_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+  image_storage_path: string | null
 }
 
 type RemoteAiSettingsRow = {
@@ -216,7 +228,7 @@ function normalizeProvider(value: string | null) {
 
 function normalizeTargetType(value: unknown): TargetType {
   const targetType = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (targetType === 'equipment' || targetType === 'profession') return targetType
+  if (targetType === 'equipment' || targetType === 'profession' || targetType === 'achievement') return targetType
   return 'card'
 }
 
@@ -751,22 +763,8 @@ Deno.serve(async request => {
       })
     }
 
-    if (action === 'remote_preview') {
-      const remoteSettings = await loadRemoteAiSettings(adminClient)
-
-      if (
-        !remoteSettings ||
-        !remoteSettings.is_enabled ||
-        !remoteSettings.base_url.trim() ||
-        !remoteSettings.shared_secret?.trim() ||
-        !remoteWorkflowJson.trim()
-      ) {
-        return jsonResponse({ error: '共享 ComfyUI 主機尚未完成設定。' }, 400)
-      }
-
-      if (!normalizedTargetType) {
-        return jsonResponse({ error: 'Missing target type.' }, 400)
-      }
+    if (action === 'remote_preview' && !normalizedTargetType) {
+      return jsonResponse({ error: 'Missing target type.' }, 400)
     }
 
     if (!activeProvider && action !== 'remote_preview' && action !== 'prompt_preview') {
@@ -894,6 +892,33 @@ Deno.serve(async request => {
       fileLabel = equipment.name || equipment.id
       fileFolder = 'equipment'
       imageField = 'image_url'
+      remoteCardDescription = equipment.description ?? ''
+    } else if (normalizedTargetType === 'achievement') {
+      const { data: achievement, error: achievementError } = await adminClient
+        .from('achievements')
+        .select('id, name, description, category, progress_mode, image_url, image_prompt, image_style, image_storage_path')
+        .eq('id', resolvedTargetId)
+        .maybeSingle()
+
+      if (achievementError || !achievement) return jsonResponse({ error: 'Achievement not found.' }, 404)
+
+      nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : achievement.image_style ?? DEFAULT_IMAGE_STYLE
+      nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : achievement.image_prompt ?? ''
+      finalPrompt = buildAchievementPrompt(
+        {
+          name: achievement.name,
+          description: achievement.description,
+          category: achievement.category,
+          progressMode: achievement.progress_mode,
+        },
+        nextStyle,
+        nextPrompt
+      )
+      fileLabel = achievement.name || achievement.id
+      fileFolder = 'achievements'
+      imageField = 'image_url'
+      existingStoragePath = achievement.image_storage_path ?? null
+      remoteCardDescription = achievement.description ?? ''
     } else {
       const { data: profession, error: professionError } = await adminClient
         .from('profession_templates')
@@ -924,6 +949,7 @@ Deno.serve(async request => {
       fileLabel = profession.name || profession.id
       fileFolder = 'professions'
       imageField = targetImageField
+      remoteCardDescription = profession.description ?? ''
     }
 
     const useRemotePromptSettings = generationSource === 'remote_comfyui' || action === 'remote_preview'
@@ -957,7 +983,7 @@ Deno.serve(async request => {
         !remoteSettings.is_enabled ||
         !remoteSettings.base_url.trim() ||
         !remoteSettings.shared_secret?.trim() ||
-        !remoteSettings.workflow_api_json.trim()
+        !remoteWorkflowJson.trim()
       ) {
         return jsonResponse({ error: '共享 ComfyUI 主機尚未完成設定。' }, 400)
       }
@@ -1104,6 +1130,23 @@ Deno.serve(async request => {
 
       if (updateError) return jsonResponse({ error: updateError.message }, 500)
       record = data as Record<string, unknown>
+    } else if (normalizedTargetType === 'achievement') {
+      const { data, error: updateError } = await adminClient
+        .from('achievements')
+        .update({
+          image_url: publicUrlData.publicUrl,
+          icon_url: publicUrlData.publicUrl,
+          image_prompt: nextPrompt || null,
+          image_style: nextStyle,
+          image_storage_path: filePath,
+          image_generated_at: new Date().toISOString(),
+        })
+        .eq('id', resolvedTargetId)
+        .select('*, achievement_conditions(*, achievement_condition_tasks(task_id))')
+        .single()
+
+      if (updateError) return jsonResponse({ error: updateError.message }, 500)
+      record = data as Record<string, unknown>
     } else {
       const { data, error: updateError } = await adminClient
         .from('profession_templates')
@@ -1126,7 +1169,7 @@ Deno.serve(async request => {
       [normalizedTargetType]: record,
       image_url: publicUrlData.publicUrl,
       image_field: imageField,
-      image_storage_path: normalizedTargetType === 'card' ? filePath : null,
+      image_storage_path: normalizedTargetType === 'card' || normalizedTargetType === 'achievement' ? filePath : null,
       image_style: nextStyle,
       image_prompt: nextPrompt || null,
       provider: activeProvider,

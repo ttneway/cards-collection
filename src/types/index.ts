@@ -23,11 +23,21 @@ export type EquipmentSourceType = 'teacher' | 'task' | 'achievement' | 'shop' | 
 export type TradeStatus = 'pending' | 'approved' | 'rejected'
 
 export type AchievementConditionType =
-  | 'cards_collected'
-  | 'points'
-  | 'tasks_completed'
+  | 'tasks_completed_total'
+  | 'tasks_completed_selected'
+  | 'task_streak_any'
+  | 'task_streak_selected'
+  | 'cards_collected_total'
   | 'series_complete'
+  | 'album_complete'
+  | 'points_earned_total'
+  | 'selected_tasks_all_complete'
   | 'rarity_collection'
+
+export type AchievementCategory = 'task' | 'card' | 'points' | 'mixed'
+export type AchievementProgressMode = 'cumulative' | 'streak' | 'all_complete'
+export type AchievementAuthoringMode = 'simple' | 'advanced'
+export type AchievementClaimMode = 'manual'
 
 export type AnnouncementCategory = 'system' | 'task'
 
@@ -254,16 +264,77 @@ export interface Achievement {
   name: string
   description: string
   icon_url: string | null
-  condition_type: AchievementConditionType
-  condition_value: number
-  condition_card_id: string | null
-  condition_series: string | null
-  condition_rarity: Rarity | null
+  image_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+  image_storage_path: string | null
+  image_generated_at: string | null
+  category: AchievementCategory
+  progress_mode: AchievementProgressMode
+  authoring_mode: AchievementAuthoringMode
+  claim_mode: AchievementClaimMode
+  sort_order: number
+  is_preset: boolean
+  condition_type?: string | null
+  condition_value?: number
+  condition_card_id?: string | null
+  condition_series?: string | null
+  condition_rarity?: Rarity | null
   card_reward: string | null
   points_reward: number
   equipment_reward_id: string | null
   is_active: boolean
   created_at: string
+  achievement_conditions?: AchievementCondition[]
+}
+
+export interface AchievementConditionTaskLink {
+  id?: string
+  condition_id?: string
+  task_id: string
+  created_at?: string
+}
+
+export interface AchievementCondition {
+  id: string
+  achievement_id: string
+  condition_type: AchievementConditionType
+  target_value: number
+  sort_order: number
+  config_json: Record<string, any>
+  created_at: string
+  achievement_condition_tasks?: AchievementConditionTaskLink[]
+}
+
+export interface AchievementStatusCondition {
+  id: string
+  condition_type: AchievementConditionType | string
+  current_value: number
+  target_value: number
+  complete: boolean
+  label: string
+}
+
+export interface AchievementStatus {
+  achievement_id: string
+  name: string
+  description: string
+  icon_url: string | null
+  image_url: string | null
+  category: AchievementCategory
+  progress_mode: AchievementProgressMode
+  claim_mode: AchievementClaimMode
+  points_reward: number
+  card_reward: string | null
+  equipment_reward_id: string | null
+  status: 'locked' | 'claimable' | 'claimed'
+  unlocked_at: string | null
+  claimed_at: string | null
+  completed_condition_count: number
+  total_condition_count: number
+  progress_percent: number
+  progress_summary: string
+  conditions: AchievementStatusCondition[]
 }
 
 export interface PlayerProgress {
@@ -350,6 +421,41 @@ export interface EquipmentTemplate {
   equipment_effects?: EquipmentEffect[]
 }
 
+export interface TitleEffect {
+  id: string
+  title_id: string
+  effect_type: ProfessionEffectType
+  base_value: number
+  description: string
+  created_at: string
+}
+
+export interface TitleTemplate {
+  id: string
+  name: string
+  description: string
+  theme_color: string
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  title_effects?: TitleEffect[]
+  effects?: TitleEffect[]
+}
+
+export interface PlayerTitle {
+  id: string
+  user_id: string
+  title_id: string
+  assigned_by: string | null
+  revoked_by: string | null
+  assigned_at: string
+  revoked_at: string | null
+  revoke_reason: string | null
+  title?: TitleTemplate
+  effects?: TitleEffect[]
+}
+
 export interface RemoteAiSettings {
   provider: 'comfyui_gateway'
   base_url: string
@@ -366,7 +472,7 @@ export interface RemoteAiSettings {
 export interface RemoteAiWorkflow {
   id: string
   name: string
-  target_type: 'all' | 'card' | 'equipment' | 'profession'
+  target_type: 'all' | 'card' | 'equipment' | 'profession' | 'achievement'
   workflow_api_json: string
   is_active: boolean
   sort_order: number
@@ -393,7 +499,7 @@ export interface PlayerEquippedItem {
 }
 
 export interface BonusEntry {
-  source_category: 'primary' | 'archived' | 'equipment'
+  source_category: 'primary' | 'archived' | 'equipment' | 'title'
   source_name: string
   effect_type: ProfessionEffectType
   value: number
@@ -405,6 +511,7 @@ export interface ComputedCharacterBonus {
     primary: BonusEntry[]
     archived: BonusEntry[]
     equipment: BonusEntry[]
+    title: BonusEntry[]
   }
 }
 
@@ -416,6 +523,8 @@ export interface CharacterProfilePayload {
     progress_percent: number
   }
   current_profession: ProfessionTemplate | null
+  active_title: PlayerTitle | null
+  earned_titles: PlayerTitle[]
   unlocked_professions: PlayerProfession[]
   available_profession_choices: ProfessionTemplate[]
   bonuses: ComputedCharacterBonus

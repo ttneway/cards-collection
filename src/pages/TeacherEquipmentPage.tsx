@@ -185,6 +185,15 @@ export default function TeacherEquipmentPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!selectedRemoteWorkflowId) return
+
+    const workflowStillAvailable = availableRemoteWorkflows.some(workflow => workflow.id === selectedRemoteWorkflowId)
+    if (!workflowStillAvailable) {
+      setSelectedRemoteWorkflowId('')
+    }
+  }, [availableRemoteWorkflows, selectedRemoteWorkflowId])
+
   const loadEquipments = async () => {
     const { data, error } = await supabase
       .from('equipment_templates')
@@ -877,6 +886,27 @@ export default function TeacherEquipmentPage() {
                   ))}
                 </div>
 
+                {aiSource === 'remote_comfyui' ? (
+                  <label className="space-y-2">
+                    <span className="text-sm text-slate-300">共享工作流</span>
+                    <select
+                      value={selectedRemoteWorkflowId}
+                      onChange={event => setSelectedRemoteWorkflowId(event.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
+                    >
+                      <option value="">{loadingRemoteWorkflows ? '讀取中...' : '使用共享主機預設 workflow'}</option>
+                      {availableRemoteWorkflows.map(workflow => (
+                        <option key={workflow.id} value={workflow.id}>
+                          {workflow.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500">
+                      沒有看到想用的工作流時，請先到「共享生圖主機」頁把該 JSON 工作流設成「全部」或「裝備」並啟用。
+                    </p>
+                  </label>
+                ) : null}
+
                 {aiSource === 'cloud' ? (
                   <>
                     <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
@@ -1035,6 +1065,31 @@ export default function TeacherEquipmentPage() {
                         </div>
                       </div>
                     ) : null}
+
+                    <AiPromptEditor
+                      visible={promptEditor.visible}
+                      loading={promptEditor.loading}
+                      generating={generatingImage}
+                      finalPrompt={promptEditor.finalPrompt}
+                      negativePrompt={promptEditor.negativePrompt}
+                      seed={promptEditor.seed}
+                      supportsNegativePrompt={promptEditor.supportsNegativePrompt}
+                      supportsSeed={promptEditor.supportsSeed}
+                      onToggle={() => {
+                        if (!promptEditor.visible) {
+                          void openPromptPreview()
+                          return
+                        }
+
+                        setPromptEditor(previous => ({ ...previous, visible: false }))
+                      }}
+                      onRefresh={() => void openPromptPreview()}
+                      onGenerate={() => void generateEquipmentImage()}
+                      onFinalPromptChange={value => setPromptEditor(previous => ({ ...previous, finalPrompt: value }))}
+                      onNegativePromptChange={value => setPromptEditor(previous => ({ ...previous, negativePrompt: value }))}
+                      onSeedChange={value => setPromptEditor(previous => ({ ...previous, seed: value }))}
+                      disabled={saving}
+                    />
                   </>
                 )}
               </div>
@@ -1100,33 +1155,6 @@ export default function TeacherEquipmentPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <div className="w-full">
-              <AiPromptEditor
-                visible={promptEditor.visible}
-                loading={promptEditor.loading}
-                generating={generatingImage}
-                finalPrompt={promptEditor.finalPrompt}
-                negativePrompt={promptEditor.negativePrompt}
-                seed={promptEditor.seed}
-                supportsNegativePrompt={promptEditor.supportsNegativePrompt}
-                supportsSeed={promptEditor.supportsSeed}
-                onToggle={() => {
-                  if (!promptEditor.visible) {
-                    void openPromptPreview()
-                    return
-                  }
-
-                  setPromptEditor(previous => ({ ...previous, visible: false }))
-                }}
-                onRefresh={() => void openPromptPreview()}
-                onGenerate={() => void generateEquipmentImage()}
-                onFinalPromptChange={value => setPromptEditor(previous => ({ ...previous, finalPrompt: value }))}
-                onNegativePromptChange={value => setPromptEditor(previous => ({ ...previous, negativePrompt: value }))}
-                onSeedChange={value => setPromptEditor(previous => ({ ...previous, seed: value }))}
-                disabled={saving}
-              />
-            </div>
-
             <button type="submit" disabled={saving} className="rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
               <Save size={18} className="mr-2 inline" />
               {saving ? '儲存中...' : editingId ? '更新裝備' : '建立裝備'}

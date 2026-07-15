@@ -52,7 +52,7 @@ type FormState = {
 type WorkflowFormState = {
   id: string | null
   name: string
-  targetType: 'all' | 'card' | 'equipment' | 'profession'
+  targetType: 'all' | 'card' | 'equipment' | 'profession' | 'achievement'
   workflowApiJson: string
   sortOrder: string
   isActive: boolean
@@ -548,7 +548,7 @@ export default function TeacherRemoteAiPage() {
               className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-600"
             >
               {savingWorkflow ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />}
-              ?????
+              新增工作流
             </button>
           ) : null}
         </div>
@@ -615,6 +615,7 @@ export default function TeacherRemoteAiPage() {
                   <option value="card">卡牌</option>
                   <option value="equipment">裝備</option>
                   <option value="profession">職業</option>
+                  <option value="achievement">成就</option>
                 </select>
               </label>
               <label className="space-y-2">

@@ -1,11 +1,12 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import { Download, Plus, Printer, RefreshCw, Save, Search, Upload } from 'lucide-react'
 import BarcodeLabel from '../components/BarcodeLabel'
+import { EFFECT_LABELS } from '../lib/character'
 import { ROLE_LABELS } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { createScanCode, downloadCsv, printBarcodeSheet } from '../utils/codes'
-import type { Class, Profile, Role, StudentRoster } from '../types'
+import type { Class, PlayerTitle, ProfessionEffectType, Profile, Role, StudentRoster, TitleTemplate } from '../types'
 
 type EditableStudent = StudentRoster
 type RegisteredProfile = Profile
@@ -38,11 +39,23 @@ const emptyStudentForm = {
   class_id: ''
 }
 
+const emptyTitleForm = {
+  name: '',
+  description: '',
+  theme_color: '#f59e0b',
+  effect_type: 'task_points_percent' as ProfessionEffectType,
+  base_value: 0
+}
+
 export default function TeacherStudentsPage() {
   const { user } = useAuthStore()
   const [students, setStudents] = useState<EditableStudent[]>([])
   const [registeredProfiles, setRegisteredProfiles] = useState<RegisteredProfile[]>([])
   const [classes, setClasses] = useState<Class[]>([])
+  const [titleTemplates, setTitleTemplates] = useState<TitleTemplate[]>([])
+  const [selectedPlayerTitles, setSelectedPlayerTitles] = useState<PlayerTitle[]>([])
+  const [selectedTitleId, setSelectedTitleId] = useState('')
+  const [titleForm, setTitleForm] = useState(emptyTitleForm)
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<UnifiedStudent | null>(null)
@@ -166,7 +179,7 @@ export default function TeacherStudentsPage() {
   )
 
   useEffect(() => {
-    void Promise.all([loadClasses(), loadStudents(), loadRegisteredProfiles()])
+    void Promise.all([loadClasses(), loadStudents(), loadRegisteredProfiles(), loadTitleTemplates()])
   }, [])
 
   useEffect(() => {
@@ -175,6 +188,17 @@ export default function TeacherStudentsPage() {
       setDraftPassword('')
     }
   }, [selected])
+
+  useEffect(() => {
+    const profileId = draft?.profile_id ?? draft?.auth_user_id ?? null
+    if (!profileId) {
+      setSelectedPlayerTitles([])
+      setSelectedTitleId('')
+      return
+    }
+
+    void loadPlayerTitles(profileId)
+  }, [draft?.profile_id, draft?.auth_user_id])
 
   useEffect(() => {
     if (selectedRegisteredProfile) {
@@ -230,6 +254,126 @@ export default function TeacherStudentsPage() {
     const rows = (data ?? []) as Class[]
     setClasses(rows)
     if (!printClassId && rows[0]) setPrintClassId(rows[0].id)
+  }
+
+  const loadTitleTemplates = async () => {
+    const { data, error } = await supabase
+      .from('title_templates')
+      .select('*, title_effects(*)')
+      .order('name')
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    const rows = (data ?? []) as TitleTemplate[]
+    setTitleTemplates(rows)
+    if (!selectedTitleId && rows[0]) setSelectedTitleId(rows[0].id)
+  }
+
+  const loadPlayerTitles = async (profileId: string) => {
+    const { data, error } = await supabase
+      .from('player_titles')
+      .select('*, title:title_id(*, title_effects(*))')
+      .eq('user_id', profileId)
+      .order('assigned_at', { ascending: false })
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    setSelectedPlayerTitles((data ?? []) as PlayerTitle[])
+  }
+
+  const assignTitleToDraft = async () => {
+    const profileId = draft?.profile_id ?? draft?.auth_user_id ?? null
+    if (!profileId || !selectedTitleId) return
+
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+
+    const { data, error } = await supabase.rpc('assign_player_title', {
+      p_user_id: profileId,
+      p_title_id: selectedTitleId
+    })
+
+    if (error) {
+      setError(error.message)
+    } else {
+      setMessage(data?.message ?? '已授與稱位。')
+      await loadPlayerTitles(profileId)
+    }
+
+    setSaving(false)
+  }
+
+  const revokeDraftTitle = async (titleId?: string) => {
+    const profileId = draft?.profile_id ?? draft?.auth_user_id ?? null
+    if (!profileId) return
+
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+
+    const { data, error } = await supabase.rpc('revoke_player_title', {
+      p_user_id: profileId,
+      p_title_id: titleId ?? null
+    })
+
+    if (error) {
+      setError(error.message)
+    } else {
+      setMessage(data?.message ?? '已移除目前稱位。')
+      await loadPlayerTitles(profileId)
+    }
+
+    setSaving(false)
+  }
+
+  const createTitleTemplate = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!user || !titleForm.name.trim()) return
+
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+
+    try {
+      const { data, error } = await supabase
+        .from('title_templates')
+        .insert({
+          name: titleForm.name.trim(),
+          description: titleForm.description.trim(),
+          theme_color: titleForm.theme_color || '#f59e0b',
+          created_by: user.id
+        })
+        .select('*')
+        .single()
+
+      if (error) throw error
+
+      if (Number(titleForm.base_value) !== 0) {
+        const { error: effectError } = await supabase.from('title_effects').insert({
+          title_id: data.id,
+          effect_type: titleForm.effect_type,
+          base_value: Number(titleForm.base_value),
+          description: EFFECT_LABELS[titleForm.effect_type] ?? titleForm.effect_type
+        })
+        if (effectError) throw effectError
+      }
+
+      setTitleForm(emptyTitleForm)
+      setSelectedTitleId(data.id)
+      setMessage('已建立稱位。')
+      await loadTitleTemplates()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '建立稱位失敗。')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const createClass = async (event: React.FormEvent) => {
@@ -736,6 +880,50 @@ export default function TeacherStudentsPage() {
         </form>
       </div>
 
+      <form onSubmit={createTitleTemplate} className="space-y-3 rounded-lg bg-slate-800 p-4">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Plus size={18} className="text-amber-400" /> 新增稱位
+        </h2>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_180px_160px_auto]">
+          <input
+            value={titleForm.name}
+            onChange={event => setTitleForm({ ...titleForm, name: event.target.value })}
+            placeholder="稱位名稱，例如：晨讀王者"
+            className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+            required
+          />
+          <input
+            value={titleForm.description}
+            onChange={event => setTitleForm({ ...titleForm, description: event.target.value })}
+            placeholder="稱位說明"
+            className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+          />
+          <select
+            value={titleForm.effect_type}
+            onChange={event => setTitleForm({ ...titleForm, effect_type: event.target.value as ProfessionEffectType })}
+            className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+          >
+            {Object.entries(EFFECT_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            step="0.01"
+            value={titleForm.base_value}
+            onChange={event => setTitleForm({ ...titleForm, base_value: Number(event.target.value) })}
+            placeholder="效果值"
+            className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+          />
+          <button disabled={saving || !titleForm.name.trim()} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">
+            建立稱位
+          </button>
+        </div>
+        <p className="text-xs text-slate-500">效果值 0 代表只保留稱位名稱，不提供加成。每位學生同時間只有目前稱位會套用效果。</p>
+      </form>
+
       <div className="space-y-3 rounded-lg bg-slate-800 p-4">
         <h2 className="flex items-center gap-2 font-semibold">
           <Upload size={18} className="text-indigo-400" /> 批次匯入學生
@@ -979,6 +1167,75 @@ export default function TeacherStudentsPage() {
                     ? '這位學生已經能用自己的 Email、姓名或身分條碼搭配密碼登入。'
                     : '建立完成後，學生可以用 Email、姓名或身分條碼搭配密碼登入。'}
                 </p>
+              </div>
+
+              <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">稱位管理</h3>
+                    <p className="mt-1 text-xs text-slate-400">曾授與過的稱位會保留紀錄；只有目前稱位的效果會作用。</p>
+                  </div>
+                  <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
+                    {selectedPlayerTitles.find(item => !item.revoked_at)?.title?.name ?? '目前沒有稱位'}
+                  </span>
+                </div>
+
+                {draft.profile_id || draft.auth_user_id ? (
+                  <>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+                      <select
+                        value={selectedTitleId}
+                        onChange={event => setSelectedTitleId(event.target.value)}
+                        className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
+                      >
+                        <option value="">選擇稱位</option>
+                        {titleTemplates.filter(title => title.is_active).map(title => (
+                          <option key={title.id} value={title.id}>
+                            {title.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void assignTitleToDraft()}
+                        disabled={saving || !selectedTitleId}
+                        className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+                      >
+                        授與稱位
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void revokeDraftTitle()}
+                        disabled={saving || !selectedPlayerTitles.some(item => !item.revoked_at)}
+                        className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        移除目前稱位
+                      </button>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {selectedPlayerTitles.length === 0 ? (
+                        <p className="text-xs text-slate-500">尚未授與過稱位。</p>
+                      ) : (
+                        selectedPlayerTitles.map(item => (
+                          <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-800/70 px-3 py-2 text-sm">
+                            <div>
+                              <p className="font-medium text-white">{item.title?.name ?? item.title_id}</p>
+                              <p className="text-xs text-slate-500">
+                                {item.revoked_at ? '歷史稱位，效果不作用' : '目前稱位，效果作用中'}
+                              </p>
+                            </div>
+                            <span className={`rounded-full px-2.5 py-1 text-xs ${item.revoked_at ? 'bg-slate-700 text-slate-400' : 'bg-amber-500/20 text-amber-200'}`}>
+                              {item.revoked_at ? '保留名稱' : '作用中'}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p className="mt-3 text-sm text-amber-300">請先為這位學生建立登入帳號，才能授與會影響角色效果的稱位。</p>
+                )}
               </div>
             </div>
 

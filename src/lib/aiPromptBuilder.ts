@@ -33,6 +33,13 @@ export type ProfessionPromptInput = {
   unlockTier: number
 }
 
+export type AchievementPromptInput = {
+  name: string
+  description?: string | null
+  category?: string | null
+  progressMode?: string | null
+}
+
 export function getStylePrompt(imageStyle: string) {
   return STYLE_PROMPTS[imageStyle] ?? STYLE_PROMPTS[DEFAULT_IMAGE_STYLE]
 }
@@ -102,6 +109,28 @@ export function buildProfessionPrompt(profession: ProfessionPromptInput, imageSt
     customPrompt,
     'The result should work as a polished profession icon or portrait for a mobile game selection screen.',
     'Avoid text, watermarks, UI, and unrelated subjects.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+export function buildAchievementPrompt(achievement: AchievementPromptInput, imageStyle: string, imagePrompt: string | null | undefined) {
+  const stylePrompt = getStylePrompt(imageStyle)
+  const customPrompt = imagePrompt?.trim()
+    ? `Supporting detail to include without replacing the achievement concept: ${imagePrompt.trim()}`
+    : ''
+  const description = achievement.description?.trim() ? `Achievement description: ${achievement.description.trim()}` : ''
+
+  return [
+    stylePrompt,
+    'Design artwork for a school game achievement badge.',
+    `The achievement named "${achievement.name}" must be represented clearly as the main subject.`,
+    `Achievement category: ${achievement.category ?? 'mixed'}.`,
+    `Progress mode: ${achievement.progressMode ?? 'cumulative'}.`,
+    description,
+    customPrompt,
+    'The result should work as a polished achievement icon or reward badge in a mobile game.',
+    'Avoid readable text, watermarks, UI, and unrelated portrait subjects.',
   ]
     .filter(Boolean)
     .join(' ')

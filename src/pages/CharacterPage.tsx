@@ -181,6 +181,7 @@ export default function CharacterPage() {
 
   const bonus = profile.bonuses as ComputedCharacterBonus
   const primaryProfession = profile.current_profession
+  const activeTitle = profile.active_title
   const progressPercent = getProgressPercent(profile)
   const currentGender = user?.gender ?? null
 
@@ -248,6 +249,10 @@ export default function CharacterPage() {
             <p>已解鎖職業 {profile.unlocked_professions.length} 個</p>
             <p className="mt-1">可選新職業次數 {profile.progress.available_unlocks}</p>
           </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          稱位：{activeTitle?.title?.name ?? '尚未取得目前稱位'}
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-slate-900/60 px-4 py-3">
@@ -399,6 +404,46 @@ export default function CharacterPage() {
           {renderBonusSection('主職業效果', bonus.breakdown.primary)}
           {renderBonusSection('保留職業效果', bonus.breakdown.archived)}
           {renderBonusSection('裝備效果', bonus.breakdown.equipment)}
+          {renderBonusSection('稱位效果', bonus.breakdown.title ?? [])}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
+        <div className="flex items-center gap-2">
+          <Crown size={18} className="text-amber-300" />
+          <h2 className="text-lg font-semibold text-white">稱位</h2>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {(profile.earned_titles ?? []).length === 0 ? (
+            <p className="text-sm text-slate-500">尚未取得稱位。</p>
+          ) : (
+            profile.earned_titles.map(item => (
+              <div key={item.id} className={`rounded-2xl border p-4 ${item.revoked_at ? 'border-slate-700 bg-slate-900/60' : 'border-amber-500/30 bg-amber-500/10'}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-white">{item.title?.name}</p>
+                    <p className="mt-1 text-sm text-slate-400">{item.title?.description || '沒有稱位說明。'}</p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs ${item.revoked_at ? 'bg-slate-700 text-slate-400' : 'bg-amber-500/20 text-amber-200'}`}>
+                    {item.revoked_at ? '歷史' : '目前'}
+                  </span>
+                </div>
+                {(item.effects ?? []).length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {(item.effects ?? []).map(effect => (
+                      <div key={effect.id} className="flex items-center justify-between rounded-xl bg-slate-900/70 px-3 py-2 text-sm">
+                        <span className="text-slate-200">{EFFECT_LABELS[effect.effect_type]}</span>
+                        <span className={item.revoked_at ? 'font-semibold text-slate-500' : 'font-semibold text-emerald-300'}>
+                          {formatEffectValue(effect.effect_type, effect.base_value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
         </div>
       </section>
 
