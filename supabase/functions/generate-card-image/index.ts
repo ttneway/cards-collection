@@ -1057,7 +1057,7 @@ Deno.serve(async request => {
         placeholders,
         sourceImageDataUrl: sourceImageDataUrl || undefined,
         sourceImageName: sourceImageName || undefined,
-        timeoutMs: 120000,
+        timeoutMs: 300000,
       })
 
       if (!remoteGeneration.ok) {

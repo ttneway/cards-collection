@@ -33,7 +33,7 @@ if ($running) {
 
 $argumentList = @(
   '/c',
-  "set `"PORT=8787`" && set `"COMFYUI_BASE_URL=$comfyBaseUrl`" && set `"GATEWAY_SHARED_SECRET=cards-comfy-2026-remote`" && set `"ALLOWED_ORIGIN=https://ttneway.github.io`" && set `"GENERATE_TIMEOUT_MS=120000`" && set `"IDLE_UNLOAD_MS=300000`" && `"$nodeExe`" `"$serverScript`""
+  "set `"PORT=8787`" && set `"COMFYUI_BASE_URL=$comfyBaseUrl`" && set `"GATEWAY_SHARED_SECRET=cards-comfy-2026-remote`" && set `"ALLOWED_ORIGIN=https://ttneway.github.io`" && set `"GENERATE_TIMEOUT_MS=300000`" && set `"IDLE_UNLOAD_MS=300000`" && `"$nodeExe`" `"$serverScript`""
 )
 
 Start-Process -FilePath 'C:\Windows\System32\cmd.exe' `

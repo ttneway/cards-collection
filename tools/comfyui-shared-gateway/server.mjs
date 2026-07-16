@@ -5,7 +5,7 @@ const port = Number(process.env.PORT || 8787)
 const comfyuiBaseUrl = (process.env.COMFYUI_BASE_URL || 'http://127.0.0.1:8188').replace(/\/+$/g, '')
 const sharedSecret = process.env.GATEWAY_SHARED_SECRET || ''
 const allowedOrigin = process.env.ALLOWED_ORIGIN || '*'
-const defaultTimeoutMs = Number(process.env.GENERATE_TIMEOUT_MS || 120000)
+const defaultTimeoutMs = Number(process.env.GENERATE_TIMEOUT_MS || 300000)
 const idleUnloadMs = Number(process.env.IDLE_UNLOAD_MS || 300000)
 const fallbackSharedSecret = 'cards-comfy-2026-remote'
 
