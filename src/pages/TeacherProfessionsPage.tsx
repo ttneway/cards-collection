@@ -109,6 +109,28 @@ const emptyPromptEditorState: PromptEditorState = {
   supportsSeed: false,
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  if (error && typeof error === 'object') {
+    if ('message' in error && typeof error.message === 'string' && error.message.trim()) {
+      return error.message
+    }
+
+    if ('error' in error && typeof error.error === 'string' && error.error.trim()) {
+      return error.error
+    }
+
+    if ('details' in error && typeof error.details === 'string' && error.details.trim()) {
+      return error.details
+    }
+  }
+
+  return fallback
+}
+
 export default function TeacherProfessionsPage() {
   const { user } = useAuthStore()
   const [professions, setProfessions] = useState<ProfessionWithEffects[]>([])
@@ -226,7 +248,7 @@ export default function TeacherProfessionsPage() {
       const nextSettings = await loadRemoteAiSettings()
       setRemoteAiSettings(nextSettings)
     } catch (settingsError) {
-      setError(settingsError instanceof Error ? settingsError.message : '讀取共享生圖設定失敗。')
+      setError(getErrorMessage(settingsError, '讀取共享生圖設定失敗。'))
     } finally {
       setLoadingRemoteAiSettings(false)
     }
@@ -363,7 +385,7 @@ export default function TeacherProfessionsPage() {
         entries: (payload?.entries ?? []) as BonusEntry[],
       })
     } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : '無法取得職業加成預覽。')
+      setError(getErrorMessage(previewError, '無法取得職業加成預覽。'))
       setPreviewBonuses(null)
     } finally {
       setPreviewLoading(false)
@@ -486,7 +508,7 @@ export default function TeacherProfessionsPage() {
       resetForm()
       await loadProfessions()
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '職業儲存失敗。')
+      setError(getErrorMessage(saveError, '職業儲存失敗。'))
     } finally {
       setSaving(false)
     }
@@ -506,7 +528,7 @@ export default function TeacherProfessionsPage() {
       const nextWorkflows = await loadRemoteAiWorkflows()
       setRemoteWorkflows(nextWorkflows)
     } catch (workflowError) {
-      setError(workflowError instanceof Error ? workflowError.message : '讀取共享工作流清單失敗。')
+      setError(getErrorMessage(workflowError, '讀取共享工作流清單失敗。'))
     } finally {
       setLoadingRemoteWorkflows(false)
     }
@@ -527,7 +549,7 @@ export default function TeacherProfessionsPage() {
       setForm(previous => ({ ...previous, [field]: result.publicUrl }))
       setMessage('職業圖片上傳完成。')
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : '職業圖片上傳失敗。')
+      setError(getErrorMessage(uploadError, '職業圖片上傳失敗。'))
     } finally {
       event.target.value = ''
     }
@@ -558,7 +580,7 @@ export default function TeacherProfessionsPage() {
       setRemoteSourceImageName(file.name)
       setMessage(`已載入圖生圖參考圖片：${file.name}`)
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : '讀取參考圖片失敗。')
+      setError(getErrorMessage(uploadError, '讀取參考圖片失敗。'))
     }
   }
 
@@ -617,7 +639,7 @@ export default function TeacherProfessionsPage() {
       applyPromptPreviewResult(preview)
     } catch (previewError) {
       setPromptEditor(previous => ({ ...previous, loading: false }))
-      setError(previewError instanceof Error ? previewError.message : '無法取得本次提示詞。')
+      setError(getErrorMessage(previewError, '無法取得本次提示詞。'))
     }
   }
 
@@ -688,7 +710,7 @@ export default function TeacherProfessionsPage() {
       await loadAiImageStatus()
       setMessage(data?.message ?? 'AI 職業圖片已生成完成。')
     } catch (generateError) {
-      setError(generateError instanceof Error ? generateError.message : 'AI 生圖失敗。')
+      setError(getErrorMessage(generateError, 'AI 生圖失敗。'))
     } finally {
       setGeneratingImage(false)
     }
@@ -733,7 +755,7 @@ export default function TeacherProfessionsPage() {
       clearRemotePreview(true)
       setMessage('已套用共享 ComfyUI 職業預覽圖。')
     } catch (applyError) {
-      setError(applyError instanceof Error ? applyError.message : '套用職業預覽圖失敗。')
+      setError(getErrorMessage(applyError, '套用職業預覽圖失敗。'))
     } finally {
       setApplyingRemotePreview(false)
     }
