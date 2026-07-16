@@ -139,6 +139,10 @@ export interface CardAlbum {
   name: string
   description: string
   cover_color: string
+  image_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+  image_storage_path?: string | null
   is_active: boolean
   created_at: string
 }
@@ -472,7 +476,7 @@ export interface RemoteAiSettings {
 export interface RemoteAiWorkflow {
   id: string
   name: string
-  target_type: 'all' | 'card' | 'equipment' | 'profession' | 'achievement'
+  target_type: 'all' | 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
   workflow_api_json: string
   is_active: boolean
   sort_order: number

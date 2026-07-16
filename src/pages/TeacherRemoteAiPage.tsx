@@ -52,7 +52,7 @@ type FormState = {
 type WorkflowFormState = {
   id: string | null
   name: string
-  targetType: 'all' | 'card' | 'equipment' | 'profession' | 'achievement'
+  targetType: 'all' | 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
   workflowApiJson: string
   sortOrder: string
   isActive: boolean
@@ -616,6 +616,7 @@ export default function TeacherRemoteAiPage() {
                   <option value="equipment">裝備</option>
                   <option value="profession">職業</option>
                   <option value="achievement">成就</option>
+                  <option value="album">???</option>
                 </select>
               </label>
               <label className="space-y-2">

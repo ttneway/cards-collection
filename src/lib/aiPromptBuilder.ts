@@ -40,6 +40,13 @@ export type AchievementPromptInput = {
   progressMode?: string | null
 }
 
+export type AlbumPromptInput = {
+  name: string
+  description?: string | null
+  coverColor?: string | null
+  cardCount?: number | null
+}
+
 export function getStylePrompt(imageStyle: string) {
   return STYLE_PROMPTS[imageStyle] ?? STYLE_PROMPTS[DEFAULT_IMAGE_STYLE]
 }
@@ -131,6 +138,28 @@ export function buildAchievementPrompt(achievement: AchievementPromptInput, imag
     customPrompt,
     'The result should work as a polished achievement icon or reward badge in a mobile game.',
     'Avoid readable text, watermarks, UI, and unrelated portrait subjects.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+export function buildAlbumPrompt(album: AlbumPromptInput, imageStyle: string, imagePrompt: string | null | undefined) {
+  const stylePrompt = getStylePrompt(imageStyle)
+  const customPrompt = imagePrompt?.trim()
+    ? `Supporting detail to include without replacing the album theme: ${imagePrompt.trim()}`
+    : ''
+  const description = album.description?.trim() ? `Album description: ${album.description.trim()}` : ''
+
+  return [
+    stylePrompt,
+    'Design artwork for a school collectible album cover.',
+    `The album named "${album.name}" must be represented clearly as the main theme.`,
+    `Cover accent color: ${album.coverColor ?? '#334155'}.`,
+    album.cardCount ? `This album currently contains ${album.cardCount} cards.` : '',
+    description,
+    customPrompt,
+    'The result should work as a polished mobile game collection book cover or binder cover.',
+    'Avoid readable text, watermarks, UI, and unrelated random portrait subjects.',
   ]
     .filter(Boolean)
     .join(' ')

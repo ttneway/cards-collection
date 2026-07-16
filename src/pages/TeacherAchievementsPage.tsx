@@ -1,29 +1,51 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
+  CheckCircle2,
   ClipboardList,
   Info,
   ImagePlus,
+  KeyRound,
   Pencil,
   Plus,
   Power,
   PowerOff,
   RefreshCw,
   Save,
+  Server,
   Sparkles,
   Trophy,
   Upload,
   Wand2,
   X,
 } from 'lucide-react'
-import { DEFAULT_HUGGING_FACE_AUTHOR, DEFAULT_HUGGING_FACE_MODEL_NAME, buildHuggingFaceModelPath, invokeAiImageFunction } from '../lib/aiImage'
+import AiPromptEditor from '../components/AiPromptEditor'
+import {
+  DEFAULT_HUGGING_FACE_AUTHOR,
+  DEFAULT_HUGGING_FACE_MODEL_NAME,
+  buildHuggingFaceModelPath,
+  formatDiagnosticsText,
+  invokeAiImageFunction,
+  loadAiPromptPreview,
+  type AiDiagnostics,
+  type AiImageStatus,
+  type PromptPreviewResult,
+} from '../lib/aiImage'
 import {
   ACHIEVEMENT_CATEGORY_LABELS,
   ACHIEVEMENT_CONDITION_LABELS,
   ACHIEVEMENT_PROGRESS_MODE_LABELS,
 } from '../lib/achievements'
 import { STYLE_OPTIONS } from '../lib/character'
-import { uploadImageFile } from '../lib/imageUpload'
+import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
+import {
+  checkRemoteAiGateway,
+  generateRemoteImagePreview,
+  loadRemoteAiSettings,
+  loadRemoteAiWorkflows,
+  releaseRemoteAiModels,
+  type RemoteAiGatewayHealth,
+} from '../lib/remoteAi'
 import { supabase } from '../lib/supabase'
 import type {
   Achievement,
@@ -34,6 +56,8 @@ import type {
   Card,
   CardAlbum,
   Rarity,
+  RemoteAiSettings,
+  RemoteAiWorkflow,
   Task,
 } from '../types'
 
@@ -81,6 +105,28 @@ type AchievementForm = {
   simple_album_id: string
   conditions: ConditionDraft[]
 }
+
+type PromptEditorState = {
+  visible: boolean
+  loading: boolean
+  targetId: string | null
+  finalPrompt: string
+  negativePrompt: string
+  seed: string
+  supportsNegativePrompt: boolean
+  supportsSeed: boolean
+}
+
+const AI_PROVIDER_OPTIONS = [
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'openai', label: 'OpenAI / ChatGPT' },
+  { value: 'huggingface', label: 'Hugging Face' },
+] as const
+
+const AI_SOURCE_OPTIONS = [
+  { value: 'cloud', label: '雲端 AI' },
+  { value: 'remote_comfyui', label: '共享 ComfyUI 主機' },
+] as const
 
 const TEMPLATE_OPTIONS: Array<{
   key: TemplateKey
@@ -155,6 +201,17 @@ const emptyForm: AchievementForm = {
   simple_series: '',
   simple_album_id: '',
   conditions: [createConditionDraft()],
+}
+
+const emptyPromptEditorState: PromptEditorState = {
+  visible: false,
+  loading: false,
+  targetId: null,
+  finalPrompt: '',
+  negativePrompt: '',
+  seed: '',
+  supportsNegativePrompt: false,
+  supportsSeed: false,
 }
 
 function getTemplateMeta(templateKey: TemplateKey) {
@@ -243,6 +300,42 @@ function inferTemplateKey(condition: AchievementCondition): TemplateKey {
   }
 }
 
+function inferLegacyStreakRecurrence(achievement: Achievement) {
+  const text = `${achievement.name} ${achievement.description ?? ''}`
+  return text.includes('\u9031') ? 'weekly' : 'daily'
+}
+
+function normalizeConditionForAchievement(
+  achievement: Pick<Achievement, 'name' | 'description' | 'progress_mode'>,
+  condition: AchievementCondition
+): AchievementCondition {
+  if (achievement.progress_mode !== 'streak') {
+    return condition
+  }
+
+  if (condition.condition_type !== 'tasks_completed_total') {
+    return condition
+  }
+
+  return {
+    ...condition,
+    condition_type: 'task_streak_any',
+    config_json: {
+      ...(condition.config_json ?? {}),
+      recurrence_type:
+        condition.config_json?.recurrence_type === 'weekly' || condition.config_json?.recurrence_type === 'daily'
+          ? condition.config_json.recurrence_type
+          : inferLegacyStreakRecurrence(achievement as Achievement),
+    },
+  }
+}
+
+function getNormalizedAchievementConditions(achievement: Achievement) {
+  return [...(achievement.achievement_conditions ?? [])]
+    .sort((left, right) => left.sort_order - right.sort_order)
+    .map(condition => normalizeConditionForAchievement(achievement, condition))
+}
+
 function mapConditionToDraft(condition: AchievementCondition): ConditionDraft {
   return createConditionDraft({
     id: condition.id,
@@ -257,7 +350,8 @@ function mapConditionToDraft(condition: AchievementCondition): ConditionDraft {
 }
 
 function mapAchievementToForm(achievement: Achievement): AchievementForm {
-  const firstCondition = achievement.achievement_conditions?.[0]
+  const normalizedConditions = getNormalizedAchievementConditions(achievement)
+  const firstCondition = normalizedConditions[0]
   const templateKey = firstCondition ? inferTemplateKey(firstCondition) : 'tasks_completed_total'
   const templateMeta = getTemplateMeta(templateKey)
 
@@ -281,7 +375,7 @@ function mapAchievementToForm(achievement: Achievement): AchievementForm {
     simple_selected_task_ids: firstCondition?.achievement_condition_tasks?.map(item => item.task_id) ?? [],
     simple_series: typeof firstCondition?.config_json?.series === 'string' ? firstCondition.config_json.series : '',
     simple_album_id: typeof firstCondition?.config_json?.album_id === 'string' ? firstCondition.config_json.album_id : '',
-    conditions: (achievement.achievement_conditions ?? []).map(mapConditionToDraft),
+    conditions: normalizedConditions.map(mapConditionToDraft),
   }
 }
 
@@ -393,13 +487,53 @@ export default function TeacherAchievementsPage() {
   const [saving, setSaving] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [generatingImage, setGeneratingImage] = useState(false)
+  const [aiImageStatus, setAiImageStatus] = useState<AiImageStatus | null>(null)
+  const [aiDiagnostics, setAiDiagnostics] = useState<string | null>(null)
+  const [checkingAiStatus, setCheckingAiStatus] = useState(false)
+  const [probingAiImage, setProbingAiImage] = useState(false)
+  const [aiSource, setAiSource] = useState<(typeof AI_SOURCE_OPTIONS)[number]['value']>('cloud')
   const [teacherApiKey, setTeacherApiKey] = useState('')
-  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'huggingface'>('gemini')
+  const [aiProvider, setAiProvider] = useState<(typeof AI_PROVIDER_OPTIONS)[number]['value']>('gemini')
   const [huggingFaceAuthor, setHuggingFaceAuthor] = useState(DEFAULT_HUGGING_FACE_AUTHOR)
   const [huggingFaceModelName, setHuggingFaceModelName] = useState(DEFAULT_HUGGING_FACE_MODEL_NAME)
+  const [remoteAiSettings, setRemoteAiSettings] = useState<RemoteAiSettings | null>(null)
+  const [loadingRemoteAiSettings, setLoadingRemoteAiSettings] = useState(false)
+  const [remoteAiHealth, setRemoteAiHealth] = useState<RemoteAiGatewayHealth | null>(null)
+  const [testingRemoteAi, setTestingRemoteAi] = useState(false)
+  const [remoteWorkflows, setRemoteWorkflows] = useState<RemoteAiWorkflow[]>([])
+  const [loadingRemoteWorkflows, setLoadingRemoteWorkflows] = useState(false)
+  const [selectedRemoteWorkflowId, setSelectedRemoteWorkflowId] = useState<string>('')
+  const [remoteSourceImageDataUrl, setRemoteSourceImageDataUrl] = useState<string | null>(null)
+  const [remoteSourceImageName, setRemoteSourceImageName] = useState<string | null>(null)
+  const [remotePreviewUrl, setRemotePreviewUrl] = useState<string | null>(null)
+  const [remotePreviewBase64, setRemotePreviewBase64] = useState<string | null>(null)
+  const [remotePreviewMimeType, setRemotePreviewMimeType] = useState<string | null>(null)
+  const [remotePreviewAchievementId, setRemotePreviewAchievementId] = useState<string | null>(null)
+  const [remotePreviewPrompt, setRemotePreviewPrompt] = useState<string>('')
+  const [remotePreviewStyle, setRemotePreviewStyle] = useState<string>(STYLE_OPTIONS[0])
+  const [applyingRemotePreview, setApplyingRemotePreview] = useState(false)
+  const [promptEditor, setPromptEditor] = useState<PromptEditorState>(emptyPromptEditorState)
 
   const albumMap = useMemo(() => new Map(albums.map(album => [album.id, album])), [albums])
+  const hasTeacherApiKey = teacherApiKey.trim().length > 0
+  const canUseAiImage = aiImageStatus?.ready !== false || hasTeacherApiKey
+  const canUseRemoteAi =
+    Boolean(remoteAiSettings?.is_enabled) &&
+    Boolean(remoteAiSettings?.base_url.trim()) &&
+    Boolean(
+      (remoteAiSettings?.workflow_api_json ?? '').trim() ||
+        remoteWorkflows.some(workflow => workflow.is_active && (workflow.target_type === 'all' || workflow.target_type === 'achievement'))
+    ) &&
+    Boolean(remoteAiSettings?.shared_secret_configured)
   const huggingFaceModel = buildHuggingFaceModelPath(huggingFaceAuthor, huggingFaceModelName)
+  const availableRemoteWorkflows = useMemo(
+    () =>
+      remoteWorkflows.filter(
+        workflow => workflow.is_active && (workflow.target_type === 'all' || workflow.target_type === 'achievement')
+      ),
+    [remoteWorkflows]
+  )
+  const aiSourceRef = useRef<(typeof AI_SOURCE_OPTIONS)[number]['value']>(aiSource)
 
   const filteredAchievements = useMemo(() => {
     if (filter === 'all') return achievements
@@ -410,7 +544,44 @@ export default function TeacherAchievementsPage() {
 
   useEffect(() => {
     void Promise.all([loadAchievements(), loadCards(), loadTasks(), loadAlbums()])
+    void loadAiImageStatus()
+    void refreshRemoteAiSettings()
+    void refreshRemoteWorkflows()
   }, [])
+
+  useEffect(() => {
+    return () => {
+      if (remotePreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(remotePreviewUrl)
+      }
+    }
+  }, [remotePreviewUrl])
+
+  useEffect(() => {
+    const previousSource = aiSourceRef.current
+    aiSourceRef.current = aiSource
+
+    if (previousSource === 'remote_comfyui' && aiSource !== 'remote_comfyui') {
+      clearRemotePreview(true)
+    }
+  }, [aiSource])
+
+  useEffect(() => {
+    return () => {
+      if (aiSourceRef.current === 'remote_comfyui') {
+        void releaseRemoteAiModels().catch(() => {})
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!selectedRemoteWorkflowId) return
+
+    const workflowStillAvailable = availableRemoteWorkflows.some(workflow => workflow.id === selectedRemoteWorkflowId)
+    if (!workflowStillAvailable) {
+      setSelectedRemoteWorkflowId('')
+    }
+  }, [availableRemoteWorkflows, selectedRemoteWorkflowId])
 
   const loadAchievements = async () => {
     const { data, error: loadError } = await supabase
@@ -446,7 +617,146 @@ export default function TeacherAchievementsPage() {
     setAlbums((data ?? []) as CardAlbum[])
   }
 
+  const refreshRemoteAiSettings = async () => {
+    setLoadingRemoteAiSettings(true)
+
+    try {
+      const nextSettings = await loadRemoteAiSettings()
+      setRemoteAiSettings(nextSettings)
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : 'Failed to load shared ComfyUI settings.')
+    } finally {
+      setLoadingRemoteAiSettings(false)
+    }
+  }
+
+  const refreshRemoteWorkflows = async () => {
+    setLoadingRemoteWorkflows(true)
+
+    try {
+      const workflows = await loadRemoteAiWorkflows()
+      setRemoteWorkflows(workflows)
+    } catch (workflowError) {
+      setError(workflowError instanceof Error ? workflowError.message : 'Failed to load shared workflows.')
+    } finally {
+      setLoadingRemoteWorkflows(false)
+    }
+  }
+
+  const releaseRemoteModelsIfNeeded = async () => {
+    if (!canUseRemoteAi) return
+
+    try {
+      await releaseRemoteAiModels()
+    } catch {
+      // Best effort cleanup only.
+    }
+  }
+
+  const clearRemotePreview = (shouldRelease = false) => {
+    if (remotePreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(remotePreviewUrl)
+    }
+
+    setRemotePreviewUrl(null)
+    setRemotePreviewBase64(null)
+    setRemotePreviewMimeType(null)
+    setRemotePreviewAchievementId(null)
+    setRemotePreviewPrompt('')
+    setRemotePreviewStyle(STYLE_OPTIONS[0])
+
+    if (shouldRelease) {
+      void releaseRemoteModelsIfNeeded()
+    }
+  }
+
+  const loadAiImageStatus = async () => {
+    setCheckingAiStatus(true)
+
+    try {
+      const result = await invokeAiImageFunction({
+        action: 'status',
+        aiProvider,
+        apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
+      })
+
+      if (!result.ok || !result.data) {
+        throw new Error((result.data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+      }
+
+      setAiImageStatus(result.data as unknown as AiImageStatus)
+    } catch (statusError) {
+      setAiImageStatus({
+        ready: false,
+        configured_provider: 'unknown',
+        active_provider: null,
+        provider_label: null,
+        model: null,
+        missing_secret: 'GEMINI_API_KEY or OPENAI_API_KEY',
+        key_source: null,
+      })
+      setError(statusError instanceof Error ? statusError.message : 'Failed to check AI image status.')
+    } finally {
+      setCheckingAiStatus(false)
+    }
+  }
+
+  const probeAiImage = async () => {
+    setProbingAiImage(true)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const result = await invokeAiImageFunction({
+        action: 'probe',
+        aiProvider,
+        apiKey: teacherApiKey.trim() || undefined,
+        modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
+      })
+
+      const data = result.data as Record<string, any> | null
+      const diagnosticsText = formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null)
+
+      if (!result.ok) {
+        setAiDiagnostics(diagnosticsText)
+        throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+      }
+
+      if (data?.error) {
+        setAiDiagnostics(diagnosticsText)
+        throw new Error(data.error as string)
+      }
+
+      setAiDiagnostics(diagnosticsText)
+      setMessage(data?.ok ? 'AI image probe succeeded.' : 'AI image probe finished.')
+    } catch (probeError) {
+      setError(probeError instanceof Error ? probeError.message : 'AI image probe failed.')
+    } finally {
+      setProbingAiImage(false)
+    }
+  }
+
+  const testRemoteAiGateway = async () => {
+    setTestingRemoteAi(true)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const result = await checkRemoteAiGateway()
+      setRemoteAiHealth(result)
+      setMessage(result.ready ? 'Shared ComfyUI host is ready.' : result.message ?? 'Shared ComfyUI host is not ready yet.')
+    } catch (healthError) {
+      setRemoteAiHealth(null)
+      setError(healthError instanceof Error ? healthError.message : 'Failed to test shared ComfyUI host.')
+    } finally {
+      setTestingRemoteAi(false)
+    }
+  }
+
   const resetForm = () => {
+    clearRemotePreview(true)
+    setPromptEditor(emptyPromptEditorState)
     setEditingId(null)
     setForm(emptyForm)
     setMessage(null)
@@ -454,6 +764,10 @@ export default function TeacherAchievementsPage() {
   }
 
   const beginEdit = (achievement: Achievement) => {
+    if (remotePreviewAchievementId && remotePreviewAchievementId !== achievement.id) {
+      clearRemotePreview(true)
+    }
+    setPromptEditor(emptyPromptEditorState)
     setEditingId(achievement.id)
     setForm(mapAchievementToForm(achievement))
     setMessage(`正在編輯成就「${achievement.name}」`)
@@ -674,13 +988,125 @@ export default function TeacherAchievementsPage() {
     }
   }
 
-  const generateAchievementImage = async () => {
-    setGeneratingImage(true)
+  const handleRemoteSourceImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
     setMessage(null)
     setError(null)
 
     try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+        reader.onerror = () => reject(new Error('讀取參考圖片失敗。'))
+        reader.readAsDataURL(file)
+      })
+
+      if (!dataUrl) {
+        throw new Error('讀取參考圖片失敗。')
+      }
+
+      setRemoteSourceImageDataUrl(dataUrl)
+      setRemoteSourceImageName(file.name)
+      setMessage(`已載入圖生圖參考圖片：${file.name}`)
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : '讀取參考圖片失敗。')
+    }
+  }
+
+  const getPromptOverrides = () => {
+    if (!promptEditor.visible || !promptEditor.finalPrompt.trim()) {
+      return {
+        finalPromptOverride: undefined,
+        negativePromptOverride: undefined,
+        seedOverride: undefined,
+      }
+    }
+
+    const parsedSeed = Number(promptEditor.seed.trim())
+
+    return {
+      finalPromptOverride: promptEditor.finalPrompt.trim(),
+      negativePromptOverride: promptEditor.supportsNegativePrompt ? promptEditor.negativePrompt.trim() : undefined,
+      seedOverride:
+        promptEditor.supportsSeed && Number.isFinite(parsedSeed) ? Math.max(0, Math.floor(parsedSeed)) : undefined,
+    }
+  }
+
+  const applyPromptPreviewResult = (result: PromptPreviewResult) => {
+    setPromptEditor({
+      visible: true,
+      loading: false,
+      targetId: result.target_id,
+      finalPrompt: result.final_prompt,
+      negativePrompt: result.negative_prompt ?? '',
+      seed: result.seed === null || result.seed === undefined ? '' : String(result.seed),
+      supportsNegativePrompt: result.supports_negative_prompt,
+      supportsSeed: result.supports_seed,
+    })
+  }
+
+  const openPromptPreview = async () => {
+    setMessage(null)
+    setError(null)
+    setPromptEditor(previous => ({ ...previous, visible: true, loading: true }))
+
+    try {
       const achievement = await ensureAchievementForImage()
+      setEditingId(achievement.id)
+      await loadAchievements()
+
+      const preview = await loadAiPromptPreview({
+        targetType: 'achievement',
+        targetId: achievement.id,
+        imagePrompt: form.image_prompt.trim(),
+        imageStyle: form.image_style,
+        generationSource: aiSource,
+        workflowId: selectedRemoteWorkflowId || undefined,
+      })
+
+      applyPromptPreviewResult(preview)
+    } catch (previewError) {
+      setPromptEditor(previous => ({ ...previous, loading: false }))
+      setError(previewError instanceof Error ? previewError.message : 'Failed to load AI prompt preview.')
+    }
+  }
+
+  const generateAchievementImage = async () => {
+    setGeneratingImage(true)
+    setMessage(null)
+    setError(null)
+    setAiDiagnostics(null)
+
+    try {
+      const achievement = await ensureAchievementForImage()
+      setEditingId(achievement.id)
+
+      if (aiSource === 'remote_comfyui') {
+        const preview = await generateRemoteImagePreview({
+          targetType: 'achievement',
+          targetId: achievement.id,
+          imagePrompt: form.image_prompt.trim(),
+          imageStyle: form.image_style,
+          workflowId: selectedRemoteWorkflowId || undefined,
+          sourceImageDataUrl: remoteSourceImageDataUrl,
+          sourceImageName: remoteSourceImageName,
+          ...getPromptOverrides(),
+        })
+
+        clearRemotePreview(true)
+        setRemotePreviewUrl(`data:${preview.mime_type};base64,${preview.preview_image_base64}`)
+        setRemotePreviewBase64(preview.preview_image_base64)
+        setRemotePreviewMimeType(preview.mime_type)
+        setRemotePreviewAchievementId(achievement.id)
+        setRemotePreviewPrompt(form.image_prompt.trim())
+        setRemotePreviewStyle(form.image_style)
+        setMessage('共享 ComfyUI 主機已產生成就預覽圖，確認後即可套用。')
+        return
+      }
+
       const result = await invokeAiImageFunction({
         action: 'generate',
         targetType: 'achievement',
@@ -690,11 +1116,18 @@ export default function TeacherAchievementsPage() {
         aiProvider,
         apiKey: teacherApiKey.trim() || undefined,
         modelOverride: aiProvider === 'huggingface' ? huggingFaceModel : undefined,
+        ...getPromptOverrides(),
       })
 
       const data = result.data as Record<string, any> | null
-      if (!result.ok || data?.error) {
+      if (!result.ok) {
+        setAiDiagnostics(formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null))
         throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+      }
+
+      if (data?.error) {
+        setAiDiagnostics(formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null))
+        throw new Error(data.error as string)
       }
 
       if (typeof data?.image_url === 'string') {
@@ -707,6 +1140,57 @@ export default function TeacherAchievementsPage() {
       setError(generateError instanceof Error ? generateError.message : 'Achievement image generation failed.')
     } finally {
       setGeneratingImage(false)
+    }
+  }
+
+  const applyRemotePreview = async () => {
+    if (!remotePreviewUrl || !remotePreviewBase64 || !remotePreviewMimeType || !remotePreviewAchievementId) {
+      setError('No shared ComfyUI preview is ready to apply.')
+      return
+    }
+
+    setApplyingRemotePreview(true)
+    setMessage(null)
+    setError(null)
+
+    try {
+      const binary = atob(remotePreviewBase64)
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+      const blob = new Blob([bytes], { type: remotePreviewMimeType })
+      const targetAchievement = achievements.find(achievement => achievement.id === remotePreviewAchievementId)
+      const uploadResult = await uploadGeneratedImageBlob(
+        blob,
+        'achievements',
+        (targetAchievement?.name ?? form.name ?? 'achievement-preview').trim()
+      )
+
+      const { data, error: updateError } = await supabase
+        .from('achievements')
+        .update({
+          image_url: uploadResult.publicUrl,
+          icon_url: uploadResult.publicUrl,
+          image_storage_path: uploadResult.path,
+          image_prompt: remotePreviewPrompt || null,
+          image_style: remotePreviewStyle,
+        })
+        .eq('id', remotePreviewAchievementId)
+        .select('*')
+        .single()
+
+      if (updateError) {
+        throw updateError
+      }
+
+      await loadAchievements()
+      if (editingId === remotePreviewAchievementId) {
+        beginEdit(data as Achievement)
+      }
+      clearRemotePreview(true)
+      setMessage('已套用共享 ComfyUI 成就預覽圖。')
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : 'Failed to apply shared ComfyUI preview.')
+    } finally {
+      setApplyingRemotePreview(false)
     }
   }
 
@@ -820,7 +1304,46 @@ export default function TeacherAchievementsPage() {
                 </div>
                 <div className="grid gap-4 lg:grid-cols-[140px_1fr]">
                   <div className="aspect-square overflow-hidden rounded-2xl border border-slate-700 bg-slate-950">
-                    {form.image_url ? (
+                    <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-white">圖生圖參考圖片</p>
+                          <p className="mt-1 text-xs text-slate-400">若你選的是圖生圖 workflow，請先上傳參考圖再按生成預覽。</p>
+                        </div>
+                        {remoteSourceImageDataUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRemoteSourceImageDataUrl(null)
+                              setRemoteSourceImageName(null)
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600"
+                          >
+                            <X size={14} />
+                            清除
+                          </button>
+                        ) : null}
+                      </div>
+                      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600 bg-slate-950 px-4 py-3 text-sm text-slate-200 hover:border-indigo-400 hover:text-white">
+                        <Upload size={16} />
+                        {remoteSourceImageName ? `已選擇：${remoteSourceImageName}` : '上傳參考圖片'}
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={event => void handleRemoteSourceImageUpload(event)}
+                          className="hidden"
+                        />
+                      </label>
+                      {remoteSourceImageDataUrl ? (
+                        <div className="overflow-hidden rounded-xl border border-white/10 bg-slate-950">
+                          <img src={remoteSourceImageDataUrl} alt={remoteSourceImageName ?? '圖生圖參考圖片'} className="h-40 w-full object-cover" />
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {remotePreviewUrl ? (
+                      <img src={remotePreviewUrl} alt={form.name || 'Achievement preview'} className="h-full w-full object-cover" />
+                    ) : form.image_url ? (
                       <img src={form.image_url} alt={form.name || 'Achievement image'} className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full items-center justify-center px-3 text-center text-xs text-slate-500">No image</div>
@@ -845,48 +1368,6 @@ export default function TeacherAchievementsPage() {
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="space-y-1">
-                    <span className="text-xs text-slate-400">AI provider</span>
-                    <select
-                      value={aiProvider}
-                      onChange={event => setAiProvider(event.target.value as typeof aiProvider)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
-                    >
-                      <option value="gemini">Gemini</option>
-                      <option value="openai">OpenAI / ChatGPT</option>
-                      <option value="huggingface">Hugging Face</option>
-                    </select>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs text-slate-400">Teacher API key optional</span>
-                    <input
-                      type="password"
-                      value={teacherApiKey}
-                      onChange={event => setTeacherApiKey(event.target.value)}
-                      autoComplete="off"
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
-                    />
-                  </label>
-                  {aiProvider === 'huggingface' ? (
-                    <>
-                      <label className="space-y-1">
-                        <span className="text-xs text-slate-400">Hugging Face author</span>
-                        <input
-                          value={huggingFaceAuthor}
-                          onChange={event => setHuggingFaceAuthor(event.target.value)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
-                        />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="text-xs text-slate-400">Hugging Face model</span>
-                        <input
-                          value={huggingFaceModelName}
-                          onChange={event => setHuggingFaceModelName(event.target.value)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
-                        />
-                      </label>
-                    </>
-                  ) : null}
-                  <label className="space-y-1">
                     <span className="text-xs text-slate-400">Style</span>
                     <select
                       value={form.image_style}
@@ -894,10 +1375,31 @@ export default function TeacherAchievementsPage() {
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
                     >
                       {STYLE_OPTIONS.map(style => (
-                        <option key={style} value={style}>{style}</option>
+                        <option key={style} value={style}>
+                          {style}
+                        </option>
                       ))}
                     </select>
                   </label>
+                  <div className="space-y-1">
+                    <span className="text-xs text-slate-400">Image source</span>
+                    <div className="flex flex-wrap gap-2">
+                      {AI_SOURCE_OPTIONS.map(option => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setAiSource(option.value)}
+                          className={`rounded-lg border px-3 py-2 text-xs ${
+                            aiSource === option.value
+                              ? 'border-indigo-500 bg-indigo-500/15 text-white'
+                              : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:border-slate-500'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <label className="space-y-1 md:col-span-2">
                     <span className="text-xs text-slate-400">Prompt details</span>
                     <textarea
@@ -909,14 +1411,228 @@ export default function TeacherAchievementsPage() {
                   </label>
                 </div>
 
+                {aiSource === 'cloud' ? (
+                  <div className="space-y-3 rounded-2xl border border-slate-700 bg-slate-900/50 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-white">
+                      <KeyRound size={16} className="text-fuchsia-300" />
+                      Teacher API key
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1">
+                        <span className="text-xs text-slate-400">AI provider</span>
+                        <select
+                          value={aiProvider}
+                          onChange={event => setAiProvider(event.target.value as typeof aiProvider)}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                        >
+                          {AI_PROVIDER_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs text-slate-400">Teacher API key optional</span>
+                        <input
+                          type="password"
+                          value={teacherApiKey}
+                          onChange={event => setTeacherApiKey(event.target.value)}
+                          autoComplete="off"
+                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                        />
+                      </label>
+                      {aiProvider === 'huggingface' ? (
+                        <>
+                          <label className="space-y-1">
+                            <span className="text-xs text-slate-400">Hugging Face author</span>
+                            <input
+                              value={huggingFaceAuthor}
+                              onChange={event => setHuggingFaceAuthor(event.target.value)}
+                              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                            />
+                          </label>
+                          <label className="space-y-1">
+                            <span className="text-xs text-slate-400">Hugging Face model</span>
+                            <input
+                              value={huggingFaceModelName}
+                              onChange={event => setHuggingFaceModelName(event.target.value)}
+                              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                            />
+                          </label>
+                        </>
+                      ) : null}
+                    </div>
+
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className={aiImageStatus?.ready ? 'text-emerald-200' : 'text-amber-200'}>
+                          {aiImageStatus?.ready
+                            ? `目前使用 ${aiImageStatus.provider_label}: ${aiImageStatus.model}${aiImageStatus.key_source === 'teacher' ? '（教師自備 key）' : '（系統設定）'}`
+                            : `目前尚未就緒：${aiImageStatus?.missing_secret ?? '請補上 API key 或系統密鑰'}`}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void loadAiImageStatus()}
+                        disabled={checkingAiStatus}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={checkingAiStatus ? 'animate-spin' : ''} />
+                        重新檢查
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void probeAiImage()}
+                        disabled={probingAiImage}
+                        className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-900/40 px-3 py-2 text-xs text-fuchsia-200 hover:bg-fuchsia-900/60 disabled:opacity-50"
+                      >
+                        {probingAiImage ? <Sparkles size={14} className="animate-pulse" /> : <Wand2 size={14} />}
+                        {probingAiImage ? '檢查中...' : '檢查 AI 連線'}
+                      </button>
+                    </div>
+
+                    {aiDiagnostics ? (
+                      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+                        <p className="mb-2 text-xs font-medium text-amber-200">AI 診斷資訊</p>
+                        <pre className="whitespace-pre-wrap break-words text-xs text-amber-100">{aiDiagnostics}</pre>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="space-y-3 rounded-2xl border border-slate-700 bg-slate-900/50 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-white">
+                      <Server size={16} className="text-indigo-300" />
+                      共享 ComfyUI 主機
+                    </div>
+                    <div className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300">
+                      {loadingRemoteAiSettings
+                        ? '正在讀取共享生圖設定...'
+                        : remoteAiSettings?.base_url
+                          ? `Gateway：${remoteAiSettings.base_url}`
+                          : '尚未設定 Gateway 公開網址'}
+                    </div>
+
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className={canUseRemoteAi ? 'text-emerald-200' : 'text-amber-200'}>
+                          {canUseRemoteAi ? '共享 ComfyUI 主機設定已就緒。' : '共享生圖主機尚未完成設定或尚未啟用。'}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {!remoteAiSettings?.shared_secret_configured
+                            ? '尚未設定共享金鑰。'
+                            : remoteAiHealth?.message ?? '可先按測試連線，確認 Gateway 與 ComfyUI 是否正常。'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void testRemoteAiGateway()}
+                        disabled={testingRemoteAi}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={testingRemoteAi ? 'animate-spin' : ''} />
+                        {testingRemoteAi ? '測試中...' : '測試連線'}
+                      </button>
+                    </div>
+
+                    {remoteAiHealth ? (
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.configured ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-100' : 'border-slate-700 bg-slate-900/60 text-slate-300'}`}>
+                          設定：{remoteAiHealth.configured ? '完成' : '未完成'}
+                        </div>
+                        <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.gateway_reachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-rose-500/30 bg-rose-500/10 text-rose-100'}`}>
+                          Gateway：{remoteAiHealth.gateway_reachable ? '可連線' : '失敗'}
+                        </div>
+                        <div className={`rounded-lg border px-3 py-2 text-xs ${remoteAiHealth.comfyui_reachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-amber-500/30 bg-amber-500/10 text-amber-100'}`}>
+                          ComfyUI：{remoteAiHealth.comfyui_reachable ? '就緒' : '未就緒'}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <label className="space-y-1">
+                      <span className="text-xs text-slate-400">共享 workflow</span>
+                      <select
+                        value={selectedRemoteWorkflowId}
+                        onChange={event => setSelectedRemoteWorkflowId(event.target.value)}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white"
+                      >
+                        <option value="">{loadingRemoteWorkflows ? '載入中...' : '使用預設 workflow'}</option>
+                        {availableRemoteWorkflows.map(workflow => (
+                          <option key={workflow.id} value={workflow.id}>
+                            {workflow.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    {remotePreviewUrl ? (
+                      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                        <div className="flex items-center gap-2 text-xs font-medium text-emerald-100">
+                          <CheckCircle2 size={14} />
+                          已產生成就預覽圖
+                        </div>
+                        <p className="mt-2 text-xs text-emerald-100/80">預覽圖還未寫入資料庫，確認後再套用到成就。</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void applyRemotePreview()}
+                            disabled={applyingRemotePreview}
+                            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                          >
+                            {applyingRemotePreview ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                            {applyingRemotePreview ? '套用中...' : '套用到成就'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => clearRemotePreview(true)}
+                            disabled={applyingRemotePreview}
+                            className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-xs text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+                          >
+                            <X size={14} />
+                            捨棄預覽
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                <AiPromptEditor
+                  visible={promptEditor.visible}
+                  loading={promptEditor.loading}
+                  generating={generatingImage}
+                  finalPrompt={promptEditor.finalPrompt}
+                  negativePrompt={promptEditor.negativePrompt}
+                  seed={promptEditor.seed}
+                  supportsNegativePrompt={promptEditor.supportsNegativePrompt}
+                  supportsSeed={promptEditor.supportsSeed}
+                  onToggle={() => {
+                    if (!promptEditor.visible) {
+                      void openPromptPreview()
+                      return
+                    }
+
+                    setPromptEditor(previous => ({ ...previous, visible: false }))
+                  }}
+                  onRefresh={() => void openPromptPreview()}
+                  onGenerate={() => void generateAchievementImage()}
+                  onFinalPromptChange={value => setPromptEditor(previous => ({ ...previous, finalPrompt: value }))}
+                  onNegativePromptChange={value => setPromptEditor(previous => ({ ...previous, negativePrompt: value }))}
+                  onSeedChange={value => setPromptEditor(previous => ({ ...previous, seed: value }))}
+                  disabled={saving || !form.name.trim()}
+                />
+
                 <button
                   type="button"
                   onClick={() => void generateAchievementImage()}
-                  disabled={saving || generatingImage || !form.name.trim()}
+                  disabled={saving || generatingImage || !form.name.trim() || (aiSource === 'cloud' ? !canUseAiImage : !canUseRemoteAi)}
                   className="inline-flex items-center gap-2 rounded-xl bg-fuchsia-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50"
                 >
                   {generatingImage ? <RefreshCw size={16} className="animate-spin" /> : <Wand2 size={16} />}
-                  {generatingImage ? 'Generating...' : 'Generate achievement image'}
+                  {generatingImage ? 'Generating...' : aiSource === 'remote_comfyui' ? 'Generate preview' : 'Generate achievement image'}
                 </button>
               </div>
 
@@ -1325,7 +2041,7 @@ export default function TeacherAchievementsPage() {
                     </div>
                     <p className="mt-2 text-sm text-slate-400">{achievement.description || '尚未填寫描述'}</p>
                     <div className="mt-3 space-y-1 text-xs text-slate-500">
-                      {(achievement.achievement_conditions ?? []).map(condition => (
+                      {getNormalizedAchievementConditions(achievement).map(condition => (
                         <p key={condition.id}>- {conditionSummary(condition, { albumMap })}</p>
                       ))}
                     </div>

@@ -15,7 +15,7 @@ export type RemoteAiGatewayHealth = {
 export type RemoteAiPreviewResult = {
   ok: boolean
   target_id: string
-  target_type: 'card' | 'equipment' | 'profession' | 'achievement'
+  target_type: 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
   card_id?: string
   provider: string
   provider_label: string
@@ -50,7 +50,7 @@ export async function loadRemoteAiWorkflows() {
 export async function saveRemoteAiWorkflow(input: {
   id?: string | null
   name: string
-  targetType: 'all' | 'card' | 'equipment' | 'profession' | 'achievement'
+  targetType: 'all' | 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
   workflowApiJson: string
   isActive: boolean
   sortOrder: number
@@ -139,12 +139,14 @@ export async function checkRemoteAiGateway() {
 }
 
 export async function generateRemoteImagePreview(input: {
-  targetType: 'card' | 'equipment' | 'profession' | 'achievement'
+  targetType: 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
   targetId: string
   imagePrompt: string
   imageStyle: string
   workflowId?: string | null
   targetImageField?: string | null
+  sourceImageDataUrl?: string | null
+  sourceImageName?: string | null
   finalPromptOverride?: string
   negativePromptOverride?: string
   seedOverride?: number | null
@@ -157,6 +159,8 @@ export async function generateRemoteImagePreview(input: {
     imageStyle: input.imageStyle,
     workflowId: input.workflowId,
     targetImageField: input.targetImageField,
+    sourceImageDataUrl: input.sourceImageDataUrl,
+    sourceImageName: input.sourceImageName,
     finalPromptOverride: input.finalPromptOverride,
     negativePromptOverride: input.negativePromptOverride,
     seedOverride: input.seedOverride,
@@ -180,6 +184,8 @@ export async function generateRemoteCardPreview(input: {
   imagePrompt: string
   imageStyle: string
   workflowId?: string | null
+  sourceImageDataUrl?: string | null
+  sourceImageName?: string | null
   finalPromptOverride?: string
   negativePromptOverride?: string
   seedOverride?: number | null
@@ -190,6 +196,8 @@ export async function generateRemoteCardPreview(input: {
     imagePrompt: input.imagePrompt,
     imageStyle: input.imageStyle,
     workflowId: input.workflowId,
+    sourceImageDataUrl: input.sourceImageDataUrl,
+    sourceImageName: input.sourceImageName,
     finalPromptOverride: input.finalPromptOverride,
     negativePromptOverride: input.negativePromptOverride,
     seedOverride: input.seedOverride,

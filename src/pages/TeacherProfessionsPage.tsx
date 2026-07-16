@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, ImagePlus, KeyRound, Plus, RefreshCw, Save, Server, Sparkles, SwitchCamera, Wand2, X } from 'lucide-react'
+import { CheckCircle2, ImagePlus, KeyRound, Plus, RefreshCw, Save, Server, Sparkles, SwitchCamera, Upload, Wand2, X } from 'lucide-react'
 import AiPromptEditor from '../components/AiPromptEditor'
 import {
   DEFAULT_HUGGING_FACE_AUTHOR,
@@ -135,6 +135,8 @@ export default function TeacherProfessionsPage() {
   const [remoteWorkflows, setRemoteWorkflows] = useState<RemoteAiWorkflow[]>([])
   const [loadingRemoteWorkflows, setLoadingRemoteWorkflows] = useState(false)
   const [selectedRemoteWorkflowId, setSelectedRemoteWorkflowId] = useState<string>('')
+  const [remoteSourceImageDataUrl, setRemoteSourceImageDataUrl] = useState<string | null>(null)
+  const [remoteSourceImageName, setRemoteSourceImageName] = useState<string | null>(null)
   const [remotePreviewUrl, setRemotePreviewUrl] = useState<string | null>(null)
   const [remotePreviewBase64, setRemotePreviewBase64] = useState<string | null>(null)
   const [remotePreviewMimeType, setRemotePreviewMimeType] = useState<string | null>(null)
@@ -531,6 +533,35 @@ export default function TeacherProfessionsPage() {
     }
   }
 
+  async function handleRemoteSourceImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!file) return
+
+    setMessage(null)
+    setError(null)
+
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+        reader.onerror = () => reject(new Error('讀取參考圖片失敗。'))
+        reader.readAsDataURL(file)
+      })
+
+      if (!dataUrl) {
+        throw new Error('讀取參考圖片失敗。')
+      }
+
+      setRemoteSourceImageDataUrl(dataUrl)
+      setRemoteSourceImageName(file.name)
+      setMessage(`已載入圖生圖參考圖片：${file.name}`)
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : '讀取參考圖片失敗。')
+    }
+  }
+
   const getPromptOverrides = () => {
     if (!promptEditor.visible || !promptEditor.finalPrompt.trim()) {
       return {
@@ -608,6 +639,8 @@ export default function TeacherProfessionsPage() {
           imageStyle: form.image_style,
           workflowId: selectedRemoteWorkflowId || undefined,
           targetImageField: professionImageTarget,
+          sourceImageDataUrl: remoteSourceImageDataUrl,
+          sourceImageName: remoteSourceImageName,
           ...getPromptOverrides(),
         })
 
@@ -1058,6 +1091,43 @@ export default function TeacherProfessionsPage() {
                         </div>
                       </div>
                     ) : null}
+
+                    <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-white">圖生圖參考圖片</p>
+                          <p className="mt-1 text-xs text-slate-400">若你選的是圖生圖 workflow，請先上傳參考圖再按生成預覽。</p>
+                        </div>
+                        {remoteSourceImageDataUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRemoteSourceImageDataUrl(null)
+                              setRemoteSourceImageName(null)
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg bg-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-600"
+                          >
+                            <X size={14} />
+                            清除
+                          </button>
+                        ) : null}
+                      </div>
+                      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-600 bg-slate-950 px-4 py-3 text-sm text-slate-200 hover:border-indigo-400 hover:text-white">
+                        <Upload size={16} />
+                        {remoteSourceImageName ? `已選擇：${remoteSourceImageName}` : '上傳參考圖片'}
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={event => void handleRemoteSourceImageUpload(event)}
+                          className="hidden"
+                        />
+                      </label>
+                      {remoteSourceImageDataUrl ? (
+                        <div className="overflow-hidden rounded-xl border border-white/10 bg-slate-950">
+                          <img src={remoteSourceImageDataUrl} alt={remoteSourceImageName ?? '圖生圖參考圖片'} className="h-40 w-full object-cover" />
+                        </div>
+                      ) : null}
+                    </div>
 
                     {remotePreviewUrl ? (
                       <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">

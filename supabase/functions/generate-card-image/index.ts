@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.2'
 import { InferenceClient } from 'https://esm.sh/@huggingface/inference'
-import { buildAchievementPrompt, buildCardPrompt, buildEquipmentPrompt, buildProfessionPrompt, DEFAULT_IMAGE_STYLE } from '../../../src/lib/aiPromptBuilder.ts'
+import { buildAchievementPrompt, buildAlbumPrompt, buildCardPrompt, buildEquipmentPrompt, buildProfessionPrompt, DEFAULT_IMAGE_STYLE } from '../../../src/lib/aiPromptBuilder.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,7 +14,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   comfyui_gateway: '共享 ComfyUI 主機',
 }
 
-type TargetType = 'card' | 'equipment' | 'profession' | 'achievement'
+type TargetType = 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
 
 type CardRow = {
   id: string
@@ -59,6 +59,17 @@ type AchievementRow = {
   description: string | null
   category: string | null
   progress_mode: string | null
+  image_url: string | null
+  image_prompt: string | null
+  image_style: string | null
+  image_storage_path: string | null
+}
+
+type AlbumRow = {
+  id: string
+  name: string
+  description: string | null
+  cover_color: string | null
   image_url: string | null
   image_prompt: string | null
   image_style: string | null
@@ -228,7 +239,7 @@ function normalizeProvider(value: string | null) {
 
 function normalizeTargetType(value: unknown): TargetType {
   const targetType = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (targetType === 'equipment' || targetType === 'profession' || targetType === 'achievement') return targetType
+  if (targetType === 'equipment' || targetType === 'profession' || targetType === 'achievement' || targetType === 'album') return targetType
   return 'card'
 }
 
@@ -239,7 +250,7 @@ function normalizeProfessionImageField(value: unknown) {
 }
 
 function getImageGenerationProfile(targetType: TargetType): ImageGenerationProfile {
-  return targetType === 'card' ? CARD_IMAGE_PROFILE : DEFAULT_IMAGE_PROFILE
+  return targetType === 'card' || targetType === 'album' ? CARD_IMAGE_PROFILE : DEFAULT_IMAGE_PROFILE
 }
 
 function resolveImageProvider(openAiApiKey: string, geminiApiKey: string, huggingFaceApiKey: string, configuredProvider: string) {
@@ -632,6 +643,10 @@ Deno.serve(async request => {
     const negativePromptOverride =
       typeof body.negativePromptOverride === 'string' ? body.negativePromptOverride.trim() : ''
     const seedOverride = normalizeSeedOverride(body.seedOverride)
+    const sourceImageDataUrl =
+      typeof body.sourceImageDataUrl === 'string' && body.sourceImageDataUrl.trim() ? body.sourceImageDataUrl.trim() : ''
+    const sourceImageName =
+      typeof body.sourceImageName === 'string' && body.sourceImageName.trim() ? body.sourceImageName.trim() : ''
     const personalProvider = resolveRequestProvider(requestProvider, requestApiKey)
     const systemProvider = resolveImageProvider(
       systemOpenAiApiKey,
@@ -919,6 +934,39 @@ Deno.serve(async request => {
       imageField = 'image_url'
       existingStoragePath = achievement.image_storage_path ?? null
       remoteCardDescription = achievement.description ?? ''
+    } else if (normalizedTargetType === 'album') {
+      const { data: album, error: albumError } = await adminClient
+        .from('card_albums')
+        .select('id, name, description, cover_color, image_url, image_prompt, image_style, image_storage_path')
+        .eq('id', resolvedTargetId)
+        .maybeSingle()
+
+      if (albumError || !album) return jsonResponse({ error: 'Album not found.' }, 404)
+
+      const { count: cardCount } = await adminClient
+        .from('cards')
+        .select('id', { count: 'exact', head: true })
+        .eq('album_id', resolvedTargetId)
+
+      nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : album.image_style ?? DEFAULT_IMAGE_STYLE
+      nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : album.image_prompt ?? ''
+      finalPrompt = buildAlbumPrompt(
+        {
+          name: album.name,
+          description: album.description,
+          coverColor: album.cover_color,
+          cardCount: cardCount ?? 0,
+        },
+        nextStyle,
+        nextPrompt
+      )
+      finalPrompt = `${finalPrompt} ${imageProfile.promptSuffix}`.trim()
+      fileLabel = album.name || album.id
+      fileFolder = 'albums'
+      imageField = 'image_url'
+      existingStoragePath = album.image_storage_path ?? null
+      remoteAlbumName = album.name ?? ''
+      remoteCardDescription = album.description ?? ''
     } else {
       const { data: profession, error: professionError } = await adminClient
         .from('profession_templates')
@@ -1007,6 +1055,8 @@ Deno.serve(async request => {
       const remoteGeneration = await callRemoteGatewayGenerate(remoteSettings, {
         workflow: remoteWorkflowJson,
         placeholders,
+        sourceImageDataUrl: sourceImageDataUrl || undefined,
+        sourceImageName: sourceImageName || undefined,
         timeoutMs: 120000,
       })
 
@@ -1147,6 +1197,21 @@ Deno.serve(async request => {
 
       if (updateError) return jsonResponse({ error: updateError.message }, 500)
       record = data as Record<string, unknown>
+    } else if (normalizedTargetType === 'album') {
+      const { data, error: updateError } = await adminClient
+        .from('card_albums')
+        .update({
+          image_url: publicUrlData.publicUrl,
+          image_prompt: nextPrompt || null,
+          image_style: nextStyle,
+          image_storage_path: filePath,
+        })
+        .eq('id', resolvedTargetId)
+        .select('*')
+        .single()
+
+      if (updateError) return jsonResponse({ error: updateError.message }, 500)
+      record = data as Record<string, unknown>
     } else {
       const { data, error: updateError } = await adminClient
         .from('profession_templates')
@@ -1169,7 +1234,7 @@ Deno.serve(async request => {
       [normalizedTargetType]: record,
       image_url: publicUrlData.publicUrl,
       image_field: imageField,
-      image_storage_path: normalizedTargetType === 'card' || normalizedTargetType === 'achievement' ? filePath : null,
+      image_storage_path: normalizedTargetType === 'card' || normalizedTargetType === 'achievement' || normalizedTargetType === 'album' ? filePath : null,
       image_style: nextStyle,
       image_prompt: nextPrompt || null,
       provider: activeProvider,

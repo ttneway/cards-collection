@@ -12,6 +12,7 @@ type AlbumSummary = {
   id: string
   name: string
   cover_color: string
+  image_url: string | null
   cards: CardWithAlbum[]
   ownedTypes: number
   totalTypes: number
@@ -88,6 +89,7 @@ export default function CardLibraryPage() {
         id: albumKey,
         name: getAlbumName(card),
         cover_color: card.album?.cover_color ?? card.color ?? '#334155',
+        image_url: card.album?.image_url ?? null,
         cards: [card],
         ownedTypes: (ownedCounts[card.id] ?? 0) > 0 ? 1 : 0,
         totalTypes: 1,
@@ -196,6 +198,11 @@ export default function CardLibraryPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
+                      {summary.image_url ? (
+                        <div className="mb-3 h-28 w-20 overflow-hidden rounded-xl border border-white/10">
+                          <img src={summary.image_url} alt={summary.name} className="h-full w-full object-cover" />
+                        </div>
+                      ) : null}
                       <p className="font-semibold text-white">{summary.name}</p>
                       <p className="mt-1 text-sm text-slate-300">
                         {summary.ownedTypes} / {summary.totalTypes} 種，{summary.ownedCopies} 張

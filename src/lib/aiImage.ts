@@ -66,7 +66,7 @@ export type AiDiagnostics = {
 
 export type PromptPreviewResult = {
   ok: boolean
-  target_type: 'card' | 'equipment' | 'profession' | 'achievement'
+  target_type: 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
   target_id: string
   final_prompt: string
   negative_prompt: string

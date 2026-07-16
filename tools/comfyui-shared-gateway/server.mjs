@@ -63,6 +63,43 @@ async function readRequestBody(request) {
   return raw ? JSON.parse(raw) : {}
 }
 
+function sanitizeUploadFileName(fileName = 'source-image.png') {
+  return fileName.replace(/[^a-zA-Z0-9._-]/g, '-')
+}
+
+function parseDataUrl(dataUrl) {
+  const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/)
+  if (!match) {
+    throw new Error('Source image must be a base64 data URL.')
+  }
+
+  return {
+    mimeType: match[1] || 'image/png',
+    bytes: Buffer.from(match[2], 'base64'),
+  }
+}
+
+async function uploadSourceImageToComfyUi(sourceImageDataUrl, sourceImageName) {
+  const { mimeType, bytes } = parseDataUrl(sourceImageDataUrl)
+  const safeFileName = sanitizeUploadFileName(sourceImageName || `source-${Date.now()}.png`)
+  const formData = new FormData()
+  formData.set('image', new Blob([bytes], { type: mimeType }), safeFileName)
+  formData.set('type', 'input')
+  formData.set('overwrite', 'true')
+
+  const response = await fetch(`${comfyuiBaseUrl}/upload/image`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(`Failed to upload source image to ComfyUI (HTTP ${response.status}).`)
+  }
+
+  return payload?.name || safeFileName
+}
+
 async function freeComfyUiMemory() {
   const response = await fetch(`${comfyuiBaseUrl}/free`, {
     method: 'POST',
@@ -226,6 +263,8 @@ const server = http.createServer(async (request, response) => {
       const body = await readRequestBody(request)
       const workflowSource = body.workflow
       const placeholders = body.placeholders ?? {}
+      const sourceImageDataUrl = typeof body.sourceImageDataUrl === 'string' ? body.sourceImageDataUrl : ''
+      const sourceImageName = typeof body.sourceImageName === 'string' ? body.sourceImageName : ''
       const timeoutMs = Number(body.timeoutMs || defaultTimeoutMs)
 
       if (!workflowSource) {
@@ -234,7 +273,14 @@ const server = http.createServer(async (request, response) => {
       }
 
       const workflowObject = typeof workflowSource === 'string' ? JSON.parse(workflowSource) : workflowSource
-      const workflow = replacePlaceholders(workflowObject, placeholders)
+      const nextPlaceholders = { ...placeholders }
+
+      if (sourceImageDataUrl) {
+        const uploadedFileName = await uploadSourceImageToComfyUi(sourceImageDataUrl, sourceImageName)
+        nextPlaceholders.source_image_filename = uploadedFileName
+      }
+
+      const workflow = replacePlaceholders(workflowObject, nextPlaceholders)
 
       const { response: promptResponse, payload: promptPayload } = await fetchJson(`${comfyuiBaseUrl}/prompt`, {
         method: 'POST',
