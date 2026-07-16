@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { invokeAiImageFunction } from './aiImage'
+import { formatDiagnosticsText, invokeAiImageFunction, type AiDiagnostics } from './aiImage'
 import type { RemoteAiSettings, RemoteAiWorkflow } from '../types'
 
 export type RemoteAiGatewayHealth = {
@@ -29,6 +29,18 @@ export type RemoteAiReleaseResult = {
   released: boolean
   reason?: string
   released_at?: string | null
+}
+
+export type RemoteAiError = Error & {
+  diagnosticsText?: string | null
+}
+
+function buildRemoteAiError(data: Record<string, unknown> | null, status: number) {
+  const message = (data?.error as string | undefined) ?? `Edge Function returned HTTP ${status}`
+  const diagnosticsText = formatDiagnosticsText((data?.diagnostics ?? null) as AiDiagnostics | string | null)
+  const error = new Error(message) as RemoteAiError
+  error.diagnosticsText = diagnosticsText
+  return error
 }
 
 export async function loadRemoteAiWorkflows() {
@@ -128,11 +140,11 @@ export async function checkRemoteAiGateway() {
   const data = result.data as Record<string, unknown> | null
 
   if (!result.ok || !data) {
-    throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+    throw buildRemoteAiError(data, result.status)
   }
 
   if (data.error) {
-    throw new Error(data.error as string)
+    throw buildRemoteAiError(data, result.status)
   }
 
   return data as unknown as RemoteAiGatewayHealth
@@ -169,11 +181,11 @@ export async function generateRemoteImagePreview(input: {
   const data = result.data as Record<string, unknown> | null
 
   if (!result.ok || !data) {
-    throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+    throw buildRemoteAiError(data, result.status)
   }
 
   if (data.error) {
-    throw new Error(data.error as string)
+    throw buildRemoteAiError(data, result.status)
   }
 
   return data as unknown as RemoteAiPreviewResult
@@ -209,11 +221,11 @@ export async function releaseRemoteAiModels() {
   const data = result.data as Record<string, unknown> | null
 
   if (!result.ok || !data) {
-    throw new Error((data?.error as string | undefined) ?? `Edge Function returned HTTP ${result.status}`)
+    throw buildRemoteAiError(data, result.status)
   }
 
   if (data.error) {
-    throw new Error(data.error as string)
+    throw buildRemoteAiError(data, result.status)
   }
 
   return data as unknown as RemoteAiReleaseResult

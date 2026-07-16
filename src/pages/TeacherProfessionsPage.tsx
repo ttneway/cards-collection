@@ -131,6 +131,14 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function getRemoteDiagnosticsText(error: unknown) {
+  if (error && typeof error === 'object' && 'diagnosticsText' in error && typeof error.diagnosticsText === 'string') {
+    return error.diagnosticsText
+  }
+
+  return null
+}
+
 export default function TeacherProfessionsPage() {
   const { user } = useAuthStore()
   const [professions, setProfessions] = useState<ProfessionWithEffects[]>([])
@@ -738,6 +746,10 @@ export default function TeacherProfessionsPage() {
       await loadAiImageStatus()
       setMessage(data?.message ?? 'AI 職業圖片已生成完成。')
     } catch (generateError) {
+      const diagnosticsText = getRemoteDiagnosticsText(generateError)
+      if (diagnosticsText) {
+        setAiDiagnostics(diagnosticsText)
+      }
       setError(getErrorMessage(generateError, 'AI 生圖失敗。'))
     } finally {
       setGeneratingImage(false)
