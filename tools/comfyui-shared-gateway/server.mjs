@@ -48,6 +48,47 @@ function replacePlaceholders(value, placeholders) {
   return value
 }
 
+function workflowContainsSourcePlaceholder(value) {
+  if (typeof value === 'string') {
+    return value.includes('{{source_image_filename}}')
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(item => workflowContainsSourcePlaceholder(item))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(item => workflowContainsSourcePlaceholder(item))
+  }
+
+  return false
+}
+
+function attachSourceImageToFirstLoadImageNode(workflowObject, uploadedFileName) {
+  if (!workflowObject || typeof workflowObject !== 'object') {
+    return workflowObject
+  }
+
+  for (const [nodeId, node] of Object.entries(workflowObject)) {
+    if (!node || typeof node !== 'object') continue
+    if (node.class_type !== 'LoadImage') continue
+    if (!node.inputs || typeof node.inputs !== 'object') continue
+
+    return {
+      ...workflowObject,
+      [nodeId]: {
+        ...node,
+        inputs: {
+          ...node.inputs,
+          image: uploadedFileName,
+        },
+      },
+    }
+  }
+
+  return workflowObject
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options)
   const payload = await response.json().catch(() => null)
@@ -274,13 +315,18 @@ const server = http.createServer(async (request, response) => {
 
       const workflowObject = typeof workflowSource === 'string' ? JSON.parse(workflowSource) : workflowSource
       const nextPlaceholders = { ...placeholders }
+      let nextWorkflowObject = workflowObject
 
       if (sourceImageDataUrl) {
         const uploadedFileName = await uploadSourceImageToComfyUi(sourceImageDataUrl, sourceImageName)
         nextPlaceholders.source_image_filename = uploadedFileName
+
+        if (!workflowContainsSourcePlaceholder(nextWorkflowObject)) {
+          nextWorkflowObject = attachSourceImageToFirstLoadImageNode(nextWorkflowObject, uploadedFileName)
+        }
       }
 
-      const workflow = replacePlaceholders(workflowObject, nextPlaceholders)
+      const workflow = replacePlaceholders(nextWorkflowObject, nextPlaceholders)
 
       const { response: promptResponse, payload: promptPayload } = await fetchJson(`${comfyuiBaseUrl}/prompt`, {
         method: 'POST',
