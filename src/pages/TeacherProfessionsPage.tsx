@@ -438,9 +438,10 @@ export default function TeacherProfessionsPage() {
   const saveProfessionRecord = async () => {
     if (!user) throw new Error('需要先登入。')
 
-    const payload = {
+    const normalizedCode = form.code.trim().toLowerCase()
+    const insertPayload = {
       name: form.name.trim(),
-      code: form.code.trim().toLowerCase(),
+      code: normalizedCode,
       description: form.description.trim(),
       theme_color: form.theme_color,
       icon_url: form.icon_url.trim() || null,
@@ -452,15 +453,42 @@ export default function TeacherProfessionsPage() {
       is_active: form.is_active,
       created_by: user.id,
     }
+    const updatePayload = {
+      name: insertPayload.name,
+      code: insertPayload.code,
+      description: insertPayload.description,
+      theme_color: insertPayload.theme_color,
+      icon_url: insertPayload.icon_url,
+      icon_url_male: insertPayload.icon_url_male,
+      icon_url_female: insertPayload.icon_url_female,
+      image_prompt: insertPayload.image_prompt,
+      image_style: insertPayload.image_style,
+      unlock_tier: insertPayload.unlock_tier,
+      is_active: insertPayload.is_active,
+    }
 
     let professionId = editingId
 
     if (!editingId) {
-      const { data, error } = await supabase.from('profession_templates').insert(payload).select('*').single()
-      if (error) throw error
-      professionId = data.id
+      const { data: existingProfession, error: existingProfessionError } = await supabase
+        .from('profession_templates')
+        .select('id')
+        .eq('code', normalizedCode)
+        .maybeSingle()
+
+      if (existingProfessionError) throw existingProfessionError
+
+      if (existingProfession) {
+        professionId = existingProfession.id
+        const { error } = await supabase.from('profession_templates').update(updatePayload).eq('id', professionId)
+        if (error) throw error
+      } else {
+        const { data, error } = await supabase.from('profession_templates').insert(insertPayload).select('*').single()
+        if (error) throw error
+        professionId = data.id
+      }
     } else {
-      const { error } = await supabase.from('profession_templates').update(payload).eq('id', editingId)
+      const { error } = await supabase.from('profession_templates').update(updatePayload).eq('id', editingId)
       if (error) throw error
 
       const { error: deleteError } = await supabase.from('profession_effects').delete().eq('profession_id', editingId)
