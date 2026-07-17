@@ -51,25 +51,48 @@ export function getStylePrompt(imageStyle: string) {
   return STYLE_PROMPTS[imageStyle] ?? STYLE_PROMPTS[DEFAULT_IMAGE_STYLE]
 }
 
+function describeAccentColor(color: string | null | undefined, fallback: string) {
+  const normalized = color?.trim().toLowerCase()
+
+  if (!normalized) return fallback
+  if (normalized === '#334155') return 'a deep slate-blue'
+  if (normalized === '#6366f1') return 'a vivid indigo-blue'
+  if (normalized === '#22c55e') return 'a fresh emerald-green'
+  if (normalized === '#ef4444') return 'a confident crimson-red'
+  if (normalized === '#f59e0b') return 'a warm amber-gold'
+  if (normalized === '#a855f7') return 'a rich violet-purple'
+  if (normalized === '#ec4899') return 'a bright rose-pink'
+
+  return 'the selected accent colour'
+}
+
+function buildSupportingDetail(detail: string | null | undefined, subject: string) {
+  const trimmedDetail = detail?.trim()
+  if (!trimmedDetail) return ''
+
+  return `Include this supporting scene detail naturally in the composition. ${trimmedDetail}. It must support ${subject} and must not replace it as the main subject.`
+}
+
+function buildNoTextInstruction(name: string) {
+  return `Do not render any words, letters, numbers, captions, logos, watermarks, or interface elements in the artwork. The card system will display the name ${name} outside the generated illustration.`
+}
+
 export function buildCardPrompt(card: CardPromptInput, imageStyle: string, imagePrompt: string | null | undefined) {
   const stylePrompt = getStylePrompt(imageStyle)
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
-    : ''
-  const description = card.description?.trim() ? `Card description: ${card.description.trim()}` : ''
+  const customPrompt = buildSupportingDetail(imagePrompt, `the ${card.name} scene`)
+  const description = card.description?.trim() ? `The scene should also reflect this card description. ${card.description.trim()}.` : ''
   const albumLabel = card.albumName ?? card.series ?? 'Campus Collection'
 
   return [
     stylePrompt,
     'Design artwork for a school collectible card.',
-    `The primary subject of this card must be "${card.name}".`,
-    `Album or collection theme: ${albumLabel}.`,
-    `Card rarity: ${card.rarity}.`,
-    `Main accent color: ${card.color ?? '#334155'}.`,
+    `Depict ${card.name} as the unmistakable main subject at first glance.`,
+    `The artwork belongs to the ${albumLabel} school collection and has ${card.rarity} rarity.`,
+    `Use ${describeAccentColor(card.color, 'a deep slate-blue')} as the main accent colour for the frame and surrounding details.`,
     description,
     customPrompt,
-    'Keep the named subject obvious at first glance.',
-    'Avoid text, watermarks, UI, and unrelated random portrait subjects.',
+    buildNoTextInstruction(card.name),
+    'Avoid unrelated portrait subjects. If a person appears, they must clearly belong to the main scene.',
   ]
     .filter(Boolean)
     .join(' ')
@@ -77,22 +100,19 @@ export function buildCardPrompt(card: CardPromptInput, imageStyle: string, image
 
 export function buildEquipmentPrompt(equipment: EquipmentPromptInput, imageStyle: string, imagePrompt: string | null | undefined) {
   const stylePrompt = getStylePrompt(imageStyle)
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
-    : ''
-  const description = equipment.description?.trim() ? `Equipment description: ${equipment.description.trim()}` : ''
+  const customPrompt = buildSupportingDetail(imagePrompt, `the ${equipment.name} equipment`)
+  const description = equipment.description?.trim() ? `The equipment should also convey this description. ${equipment.description.trim()}.` : ''
 
   return [
     stylePrompt,
     'Design artwork for a school collectible equipment item.',
-    `The equipment named "${equipment.name}" must be the main subject.`,
-    `Equipment slot: ${equipment.slotType}.`,
-    `Equipment rarity: ${equipment.rarity}.`,
+    `Depict ${equipment.name} as the unmistakable main subject.`,
+    `It is a ${equipment.rarity} ${equipment.slotType} equipment item.`,
     description,
     customPrompt,
     'The item itself must dominate the composition.',
     'If a character appears, they must remain secondary to the equipment.',
-    'Avoid text, watermarks, UI, and unrelated random portraits.',
+    buildNoTextInstruction(equipment.name),
   ]
     .filter(Boolean)
     .join(' ')
@@ -100,22 +120,19 @@ export function buildEquipmentPrompt(equipment: EquipmentPromptInput, imageStyle
 
 export function buildProfessionPrompt(profession: ProfessionPromptInput, imageStyle: string, imagePrompt: string | null | undefined) {
   const stylePrompt = getStylePrompt(imageStyle)
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without replacing the main subject: ${imagePrompt.trim()}`
-    : ''
-  const description = profession.description?.trim() ? `Profession description: ${profession.description.trim()}` : ''
+  const customPrompt = buildSupportingDetail(imagePrompt, `the ${profession.name} profession`)
+  const description = profession.description?.trim() ? `The profession should also convey this description. ${profession.description.trim()}.` : ''
 
   return [
     stylePrompt,
     'Design artwork for a fantasy school profession or class.',
-    `The profession named "${profession.name}" must be represented clearly as the main subject.`,
-    `Profession code: ${profession.code}.`,
-    `Theme color: ${profession.themeColor ?? '#6366f1'}.`,
-    `Unlock tier: ${profession.unlockTier}.`,
+    `Represent ${profession.name} clearly as the main subject.`,
+    `This is an advanced school profession unlocked at tier ${profession.unlockTier}.`,
+    `Use ${describeAccentColor(profession.themeColor, 'a vivid indigo-blue')} as the profession's accent colour.`,
     description,
     customPrompt,
     'The result should work as a polished profession icon or portrait for a mobile game selection screen.',
-    'Avoid text, watermarks, UI, and unrelated subjects.',
+    buildNoTextInstruction(profession.name),
   ]
     .filter(Boolean)
     .join(' ')
@@ -123,21 +140,18 @@ export function buildProfessionPrompt(profession: ProfessionPromptInput, imageSt
 
 export function buildAchievementPrompt(achievement: AchievementPromptInput, imageStyle: string, imagePrompt: string | null | undefined) {
   const stylePrompt = getStylePrompt(imageStyle)
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without replacing the achievement concept: ${imagePrompt.trim()}`
-    : ''
-  const description = achievement.description?.trim() ? `Achievement description: ${achievement.description.trim()}` : ''
+  const customPrompt = buildSupportingDetail(imagePrompt, `the ${achievement.name} achievement concept`)
+  const description = achievement.description?.trim() ? `The badge should also convey this description. ${achievement.description.trim()}.` : ''
 
   return [
     stylePrompt,
     'Design artwork for a school game achievement badge.',
-    `The achievement named "${achievement.name}" must be represented clearly as the main subject.`,
-    `Achievement category: ${achievement.category ?? 'mixed'}.`,
-    `Progress mode: ${achievement.progressMode ?? 'cumulative'}.`,
+    `Represent the ${achievement.name} achievement concept clearly and symbolically.`,
+    `It represents ${achievement.progressMode ?? 'cumulative'} progress in a ${achievement.category ?? 'mixed'} activity.`,
     description,
     customPrompt,
     'The result should work as a polished achievement icon or reward badge in a mobile game.',
-    'Avoid readable text, watermarks, UI, and unrelated portrait subjects.',
+    buildNoTextInstruction(achievement.name),
   ]
     .filter(Boolean)
     .join(' ')
@@ -145,21 +159,19 @@ export function buildAchievementPrompt(achievement: AchievementPromptInput, imag
 
 export function buildAlbumPrompt(album: AlbumPromptInput, imageStyle: string, imagePrompt: string | null | undefined) {
   const stylePrompt = getStylePrompt(imageStyle)
-  const customPrompt = imagePrompt?.trim()
-    ? `Supporting detail to include without replacing the album theme: ${imagePrompt.trim()}`
-    : ''
-  const description = album.description?.trim() ? `Album description: ${album.description.trim()}` : ''
+  const customPrompt = buildSupportingDetail(imagePrompt, `the ${album.name} album theme`)
+  const description = album.description?.trim() ? `The cover should also convey this description. ${album.description.trim()}.` : ''
 
   return [
     stylePrompt,
     'Design artwork for a school collectible album cover.',
-    `The album named "${album.name}" must be represented clearly as the main theme.`,
-    `Cover accent color: ${album.coverColor ?? '#334155'}.`,
-    album.cardCount ? `This album currently contains ${album.cardCount} cards.` : '',
+    `Represent the ${album.name} album theme clearly as the main visual idea.`,
+    `Use ${describeAccentColor(album.coverColor, 'a deep slate-blue')} as the cover accent colour.`,
+    album.cardCount ? `The collection has room for ${album.cardCount} cards.` : '',
     description,
     customPrompt,
     'The result should work as a polished mobile game collection book cover or binder cover.',
-    'Avoid readable text, watermarks, UI, and unrelated random portrait subjects.',
+    buildNoTextInstruction(album.name),
   ]
     .filter(Boolean)
     .join(' ')
