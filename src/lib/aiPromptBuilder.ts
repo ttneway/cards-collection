@@ -73,8 +73,8 @@ function buildSupportingDetail(detail: string | null | undefined, subject: strin
   return `Include this supporting scene detail naturally in the composition. ${trimmedDetail}. It must support ${subject} and must not replace it as the main subject.`
 }
 
-function buildNoTextInstruction(name: string) {
-  return `Do not render any words, letters, numbers, captions, logos, watermarks, or interface elements in the artwork. The card system will display the name ${name} outside the generated illustration.`
+function buildNoTextInstruction() {
+  return 'Do not render any words, letters, numbers, captions, logos, watermarks, or interface elements in the artwork. The application adds the title and all labels outside the generated illustration.'
 }
 
 export function buildCardPrompt(card: CardPromptInput, imageStyle: string, imagePrompt: string | null | undefined) {
@@ -91,7 +91,7 @@ export function buildCardPrompt(card: CardPromptInput, imageStyle: string, image
     `Use ${describeAccentColor(card.color, 'a deep slate-blue')} as the main accent colour for the frame and surrounding details.`,
     description,
     customPrompt,
-    buildNoTextInstruction(card.name),
+    buildNoTextInstruction(),
     'Avoid unrelated portrait subjects. If a person appears, they must clearly belong to the main scene.',
   ]
     .filter(Boolean)
@@ -112,7 +112,7 @@ export function buildEquipmentPrompt(equipment: EquipmentPromptInput, imageStyle
     customPrompt,
     'The item itself must dominate the composition.',
     'If a character appears, they must remain secondary to the equipment.',
-    buildNoTextInstruction(equipment.name),
+    buildNoTextInstruction(),
   ]
     .filter(Boolean)
     .join(' ')
@@ -132,7 +132,7 @@ export function buildProfessionPrompt(profession: ProfessionPromptInput, imageSt
     description,
     customPrompt,
     'The result should work as a polished profession icon or portrait for a mobile game selection screen.',
-    buildNoTextInstruction(profession.name),
+    buildNoTextInstruction(),
   ]
     .filter(Boolean)
     .join(' ')
@@ -151,7 +151,7 @@ export function buildAchievementPrompt(achievement: AchievementPromptInput, imag
     description,
     customPrompt,
     'The result should work as a polished achievement icon or reward badge in a mobile game.',
-    buildNoTextInstruction(achievement.name),
+    buildNoTextInstruction(),
   ]
     .filter(Boolean)
     .join(' ')
@@ -171,7 +171,7 @@ export function buildAlbumPrompt(album: AlbumPromptInput, imageStyle: string, im
     description,
     customPrompt,
     'The result should work as a polished mobile game collection book cover or binder cover.',
-    buildNoTextInstruction(album.name),
+    buildNoTextInstruction(),
   ]
     .filter(Boolean)
     .join(' ')
