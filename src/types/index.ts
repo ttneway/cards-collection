@@ -52,6 +52,8 @@ export interface Profile {
   class_id: string | null
   stars: number
   avatar_url: string | null
+  avatar_original_url: string | null
+  avatar_generated_url: string | null
   scan_code: string | null
   hide_high_rarity_announcements: boolean
   created_at: string

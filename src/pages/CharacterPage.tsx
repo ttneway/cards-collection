@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Crown, Shield, ShoppingBag, Star, Wand2 } from 'lucide-react'
+import { Crown, Shield, ShoppingBag, Star, User, Wand2 } from 'lucide-react'
 import { resolveProfessionImageUrl } from '../lib/professionImages'
 import { supabase } from '../lib/supabase'
 import { EFFECT_LABELS, SLOT_LABELS, formatEffectValue, formatEquipmentRarity, getTierLabel } from '../lib/character'
@@ -232,6 +232,13 @@ export default function CharacterPage() {
       <section className="rounded-3xl border border-indigo-500/20 bg-gradient-to-br from-slate-800 to-slate-900 p-5 shadow-xl">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-4">
+            <div className="h-28 w-28 shrink-0 overflow-hidden rounded-2xl border border-indigo-400/30 bg-slate-950 md:h-32 md:w-32">
+              {user?.avatar_generated_url ?? user?.avatar_url ?? user?.avatar_original_url ? (
+                <img src={user?.avatar_generated_url ?? user?.avatar_url ?? user?.avatar_original_url ?? ''} alt="角色頭像" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center"><User className="text-slate-500" size={40} /></div>
+              )}
+            </div>
             {renderSquareImage(resolveProfessionImageUrl(primaryProfession, currentGender), primaryProfession?.name ?? '主職業', '未設定\n職業圖', 'h-20 w-20')}
             <div>
               <p className="text-sm text-indigo-300">角色等級</p>
