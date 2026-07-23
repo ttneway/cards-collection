@@ -1,9 +1,10 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Download, Plus, Printer, RefreshCw, Save, Search, Upload } from 'lucide-react'
 import BarcodeLabel from '../components/BarcodeLabel'
 import { EFFECT_LABELS } from '../lib/character'
 import { ROLE_LABELS } from '../lib/constants'
 import { supabase } from '../lib/supabase'
+import { uploadImageFile } from '../lib/imageUpload'
 import { useAuthStore } from '../stores/authStore'
 import { createScanCode, downloadCsv, printBarcodeSheet } from '../utils/codes'
 import type { Class, PlayerTitle, ProfessionEffectType, Profile, Role, StudentRoster, TitleTemplate } from '../types'
@@ -581,6 +582,21 @@ export default function TeacherStudentsPage() {
     setSaving(false)
   }
 
+  const uploadRegisteredAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !registeredDraft) return
+    setSaving(true); setError(null); setMessage(null)
+    try {
+      const result = await uploadImageFile(file, 'avatars')
+      const { error } = await supabase.from('profiles').update({ avatar_original_url: result.publicUrl }).eq('id', registeredDraft.id)
+      if (error) throw error
+      setRegisteredDraft({ ...registeredDraft, avatar_original_url: result.publicUrl })
+      setMessage('已儲存學生原始照片，可作為共享 ComfyUI 圖生圖來源。')
+      await loadRegisteredProfiles()
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '原始照片上傳失敗。') }
+    finally { setSaving(false) }
+  }
   const saveRegisteredProfile = async () => {
     if (!registeredDraft) return
 
@@ -1349,6 +1365,19 @@ export default function TeacherStudentsPage() {
                   </div>
                 </div>
 
+                <div className="rounded-lg border border-slate-700 bg-slate-800/70 p-3">
+                  <p className="text-sm font-semibold text-white">角色照片</p>
+                  <div className="mt-3 flex items-center gap-3">
+                    <div className="h-20 w-20 overflow-hidden rounded-lg bg-slate-950">
+                      {registeredDraft.avatar_generated_url ?? registeredDraft.avatar_original_url ? <img src={registeredDraft.avatar_generated_url ?? registeredDraft.avatar_original_url ?? ''} alt="學生頭像" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-slate-500">尚無照片</div>}
+                    </div>
+                    <label className="cursor-pointer rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600">
+                      上傳原始照片
+                      <input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void uploadRegisteredAvatar(event)} disabled={saving} className="hidden" />
+                    </label>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-400">原始照片會保留，生成的 Q 版頭像會另存，不會覆蓋原圖。</p>
+                </div>
                 <div className="rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-3 text-sm text-slate-300">
                   <p>目前身分碼：<span className="font-mono text-indigo-300">{registeredDraft.scan_code ?? '尚未產生'}</span></p>
                   <p className="mt-2 text-xs text-slate-500">

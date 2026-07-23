@@ -239,7 +239,7 @@ function normalizeProvider(value: string | null) {
 
 function normalizeTargetType(value: unknown): TargetType {
   const targetType = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (targetType === 'equipment' || targetType === 'profession' || targetType === 'achievement' || targetType === 'album') return targetType
+  if (targetType === 'equipment' || targetType === 'profession' || targetType === 'achievement' || targetType === 'album' || targetType === 'profile') return targetType
   return 'card'
 }
 
@@ -967,6 +967,21 @@ Deno.serve(async request => {
       existingStoragePath = album.image_storage_path ?? null
       remoteAlbumName = album.name ?? ''
       remoteCardDescription = album.description ?? ''
+    } else if (normalizedTargetType === 'profile') {
+      const { data: profile, error: profileError } = await adminClient
+        .from('profiles')
+        .select('id, name, avatar_original_url, avatar_generated_url')
+        .eq('id', resolvedTargetId)
+        .maybeSingle()
+
+      if (profileError || !profile) return jsonResponse({ error: 'Profile not found.' }, 404)
+      nextStyle = typeof body.imageStyle === 'string' && body.imageStyle.trim() ? body.imageStyle.trim() : DEFAULT_IMAGE_STYLE
+      nextPrompt = typeof body.imagePrompt === 'string' ? body.imagePrompt.trim() : 'Keep the person identity and transform the portrait into a friendly chibi anime school character.'
+      finalPrompt = `${nextPrompt} Do not add text, logos, watermarks, or extra people.`
+      fileLabel = profile.name || profile.id
+      fileFolder = 'avatars'
+      imageField = 'avatar_generated_url'
+      remoteCardDescription = 'Student character avatar'
     } else {
       const { data: profession, error: professionError } = await adminClient
         .from('profession_templates')
@@ -1210,6 +1225,15 @@ Deno.serve(async request => {
         .select('*')
         .single()
 
+      if (updateError) return jsonResponse({ error: updateError.message }, 500)
+      record = data as Record<string, unknown>
+    } else if (normalizedTargetType === 'profile') {
+      const { data, error: updateError } = await adminClient
+        .from('profiles')
+        .update({ avatar_generated_url: publicUrlData.publicUrl, avatar_url: publicUrlData.publicUrl })
+        .eq('id', resolvedTargetId)
+        .select('*')
+        .single()
       if (updateError) return jsonResponse({ error: updateError.message }, 500)
       record = data as Record<string, unknown>
     } else {

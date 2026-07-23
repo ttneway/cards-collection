@@ -15,7 +15,7 @@ export type RemoteAiGatewayHealth = {
 export type RemoteAiPreviewResult = {
   ok: boolean
   target_id: string
-  target_type: 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
+  target_type: 'card' | 'equipment' | 'profession' | 'achievement' | 'album' | 'profile'
   card_id?: string
   provider: string
   provider_label: string
@@ -62,7 +62,7 @@ export async function loadRemoteAiWorkflows() {
 export async function saveRemoteAiWorkflow(input: {
   id?: string | null
   name: string
-  targetType: 'all' | 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
+  targetType: 'all' | 'card' | 'equipment' | 'profession' | 'achievement' | 'album' | 'profile'
   workflowApiJson: string
   isActive: boolean
   sortOrder: number
@@ -151,7 +151,7 @@ export async function checkRemoteAiGateway() {
 }
 
 export async function generateRemoteImagePreview(input: {
-  targetType: 'card' | 'equipment' | 'profession' | 'achievement' | 'album'
+  targetType: 'card' | 'equipment' | 'profession' | 'achievement' | 'album' | 'profile'
   targetId: string
   imagePrompt: string
   imageStyle: string
