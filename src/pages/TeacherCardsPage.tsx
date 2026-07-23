@@ -870,12 +870,10 @@ export default function TeacherCardsPage() {
 
               <label className="space-y-2">
                 <span className="text-sm text-slate-300">卡牌主色</span>
-                <input
-                  value={cardForm.color}
-                  onChange={event => setCardForm({ ...cardForm, color: event.target.value })}
-                  placeholder="#334155"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white"
-                />
+                <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2">
+                  <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(cardForm.color) ? cardForm.color : '#334155'} onChange={event => setCardForm({ ...cardForm, color: event.target.value })} className="h-10 w-12 cursor-pointer rounded border-0 bg-transparent" aria-label="選擇卡牌主色" />
+                  <span className="font-mono text-sm text-slate-200">{cardForm.color || '#334155'}</span>
+                </div>
               </label>
 
               <label className="space-y-2 md:col-span-2">
