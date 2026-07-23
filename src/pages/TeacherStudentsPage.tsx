@@ -4,7 +4,7 @@ import BarcodeLabel from '../components/BarcodeLabel'
 import { EFFECT_LABELS } from '../lib/character'
 import { ROLE_LABELS } from '../lib/constants'
 import { supabase } from '../lib/supabase'
-import { uploadImageFile } from '../lib/imageUpload'
+import { uploadGeneratedImageBlob, uploadImageFile } from '../lib/imageUpload'
 import { useAuthStore } from '../stores/authStore'
 import { createScanCode, downloadCsv, printBarcodeSheet } from '../utils/codes'
 import type { Class, PlayerTitle, ProfessionEffectType, Profile, Role, StudentRoster, TitleTemplate } from '../types'
@@ -70,6 +70,8 @@ export default function TeacherStudentsPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [avatarSourceDataUrl, setAvatarSourceDataUrl] = useState<string | null>(null)
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null)
 
   const classedRegisteredProfiles = useMemo(() => {
     const linkedProfileIds = new Set(
@@ -591,11 +593,34 @@ export default function TeacherStudentsPage() {
       const result = await uploadImageFile(file, 'avatars')
       const { error } = await supabase.from('profiles').update({ avatar_original_url: result.publicUrl }).eq('id', registeredDraft.id)
       if (error) throw error
-      setRegisteredDraft({ ...registeredDraft, avatar_original_url: result.publicUrl })
+      setRegisteredDraft({ ...registeredDraft, avatar_original_url: result.publicUrl }); const reader = new FileReader(); reader.onload = () => setAvatarSourceDataUrl(typeof reader.result === 'string' ? reader.result : null); reader.readAsDataURL(file)
       setMessage('已儲存學生原始照片，可作為共享 ComfyUI 圖生圖來源。')
       await loadRegisteredProfiles()
     } catch (caught) { setError(caught instanceof Error ? caught.message : '原始照片上傳失敗。') }
     finally { setSaving(false) }
+  }
+  const generateRegisteredAvatar = async () => {
+    if (!registeredDraft || !avatarSourceDataUrl) { setError('請先上傳原始照片。'); return }
+    setSaving(true); setError(null); setMessage(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { action: 'remote_preview', targetType: 'profile', targetId: registeredDraft.id, imagePrompt: 'Transform this student photo into a friendly chibi anime school character portrait. Preserve the person identity, hairstyle, and overall appearance. No text.', imageStyle: 'Q版校園奇幻', sourceImageDataUrl: avatarSourceDataUrl, sourceImageName: 'student-avatar.png' } })
+      if (error || data?.error) throw new Error(data?.error ?? error?.message)
+      setAvatarPreviewUrl(`data:${data.mime_type ?? 'image/png'};base64,${data.preview_image_base64}`)
+      setMessage('已產生 Q 版頭像預覽，確認後可套用。')
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Q 版頭像生成失敗。') } finally { setSaving(false) }
+  }
+
+  const applyRegisteredAvatar = async () => {
+    if (!registeredDraft || !avatarPreviewUrl) return
+    setSaving(true); setError(null)
+    try {
+      const blob = await fetch(avatarPreviewUrl).then(response => response.blob())
+      const result = await uploadGeneratedImageBlob(blob, 'avatars', `${registeredDraft.name}-chibi-avatar`)
+      const { error } = await supabase.from('profiles').update({ avatar_generated_url: result.publicUrl, avatar_url: result.publicUrl }).eq('id', registeredDraft.id)
+      if (error) throw error
+      setRegisteredDraft({ ...registeredDraft, avatar_generated_url: result.publicUrl, avatar_url: result.publicUrl })
+      setAvatarPreviewUrl(null); setMessage('已套用 Q 版角色頭像。'); await loadRegisteredProfiles()
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '套用 Q 版頭像失敗。') } finally { setSaving(false) }
   }
   const saveRegisteredProfile = async () => {
     if (!registeredDraft) return
@@ -1376,7 +1401,8 @@ export default function TeacherStudentsPage() {
                       <input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void uploadRegisteredAvatar(event)} disabled={saving} className="hidden" />
                     </label>
                   </div>
-                  <p className="mt-2 text-xs text-slate-400">原始照片會保留，生成的 Q 版頭像會另存，不會覆蓋原圖。</p>
+                  <p className="mt-2 text-xs text-slate-400">原始照片會保留，生成的 Q 版頭像會另存，不會覆蓋原圖。</p>                  <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void generateRegisteredAvatar()} disabled={saving || !avatarSourceDataUrl} className="rounded-lg bg-fuchsia-600 px-3 py-2 text-sm text-white disabled:opacity-50">產生 Q 版預覽</button>{avatarPreviewUrl ? <button type="button" onClick={() => void applyRegisteredAvatar()} disabled={saving} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm text-white">套用 Q 版頭像</button> : null}</div>
+                  {avatarPreviewUrl ? <img src={avatarPreviewUrl} alt="Q 版頭像預覽" className="mt-3 h-28 w-28 rounded-lg object-cover" /> : null}
                 </div>
                 <div className="rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-3 text-sm text-slate-300">
                   <p>目前身分碼：<span className="font-mono text-indigo-300">{registeredDraft.scan_code ?? '尚未產生'}</span></p>
