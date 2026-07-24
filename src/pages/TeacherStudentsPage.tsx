@@ -584,6 +584,12 @@ export default function TeacherStudentsPage() {
     setSaving(false)
   }
 
+  const uploadDraftAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; event.target.value = ''; const profileId = draft?.profile_id ?? draft?.auth_user_id
+    if (!file || !profileId) { setError('請先為這位學生開通登入帳號，再設定角色照片。'); return }
+    setSaving(true); try { const result = await uploadImageFile(file, 'avatars'); const { error } = await supabase.from('profiles').update({ avatar_original_url: result.publicUrl }).eq('id', profileId); if (error) throw error; setMessage('已儲存學生原始照片。'); await loadRegisteredProfiles() } catch (caught) { setError(caught instanceof Error ? caught.message : '原始照片上傳失敗。') } finally { setSaving(false) }
+  }
+
   const uploadRegisteredAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -1213,7 +1219,7 @@ export default function TeacherStudentsPage() {
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-white">稱位管理</h3>
+                    <div className="mb-4 rounded-lg border border-slate-700 bg-slate-900/40 p-4"><h3 className="text-sm font-semibold text-white">角色照片</h3><label className="mt-3 inline-flex cursor-pointer rounded-lg bg-slate-700 px-3 py-2 text-sm text-white">上傳原始照片<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void uploadDraftAvatar(event)} disabled={saving || !(draft.profile_id ?? draft.auth_user_id)} className="hidden" /></label></div><h3 className="text-sm font-semibold text-white">稱位管理</h3>
                     <p className="mt-1 text-xs text-slate-400">曾授與過的稱位會保留紀錄；只有目前稱位的效果會作用。</p>
                   </div>
                   <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">
@@ -1229,7 +1235,7 @@ export default function TeacherStudentsPage() {
                         onChange={event => setSelectedTitleId(event.target.value)}
                         className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white outline-none focus:border-indigo-500"
                       >
-                        <option value="">選擇稱位</option>
+                        <option value="">{titleTemplates.filter(title => title.is_active).length === 0 ? '尚未建立稱位，請先在頁面上方新增' : '選擇稱位'}</option>
                         {titleTemplates.filter(title => title.is_active).map(title => (
                           <option key={title.id} value={title.id}>
                             {title.name}
